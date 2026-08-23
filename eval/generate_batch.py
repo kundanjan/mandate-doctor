@@ -6,7 +6,8 @@ Distribution sources:
 - productgrowth.in (updated Jun 2026): typical merchant-side UPI failure breakdown
   from fintech audits, sourced from NPCI Circular OC-149 and NPCI BD/TD statistics
   https://productgrowth.in/insights/fintech/upi-payment-success-rates/
-- Razorpay official error codes: github.com/razorpay/markdown-docs/blob/master/errors/payments/list.md
+- Razorpay official error codes:
+  github.com/razorpay/markdown-docs/blob/master/errors/payments/list.md
 - NPCI per-bank BD/TD data: npci.org.in/statistics/bd-td-and-uptime
 
 Distribution (based on industry data):
@@ -31,24 +32,40 @@ from mandate_doctor.core.models import DebitAttempt, ErrorDetail, FailureBucket
 # Each entry: (error_code, description, source_bucket, weight)
 DISTRIBUTION: list[tuple[str, str, FailureBucket, float]] = [
     # TECHNICAL — bank server timeout (35-45%, midpoint 40%)
-    ("bank_technical_error", "Bank server timeout during payment processing", FailureBucket.TECHNICAL, 0.25),
+    (
+        "bank_technical_error",
+        "Bank server timeout during payment processing",
+        FailureBucket.TECHNICAL,
+        0.25,
+    ),
     ("timeout", "Payment gateway request timed out", FailureBucket.TECHNICAL, 0.10),
     ("gateway_technical_error", "Gateway technical error", FailureBucket.TECHNICAL, 0.05),
-
     # AMBIGUOUS — wrong UPI PIN / exceeded attempts (20-30%, midpoint 25%)
     ("invalid_upi_pin", "Incorrect UPI PIN entered", FailureBucket.AMBIGUOUS, 0.10),
     ("incorrect_pin", "Wrong PIN provided for authentication", FailureBucket.AMBIGUOUS, 0.05),
     ("pin_attempts_exceeded", "Maximum PIN attempts exceeded", FailureBucket.AMBIGUOUS, 0.05),
-    ("authentication_failed", "3D secure or OTP authentication failed", FailureBucket.AMBIGUOUS, 0.05),
-
+    (
+        "authentication_failed",
+        "3D secure or OTP authentication failed",
+        FailureBucket.AMBIGUOUS,
+        0.05,
+    ),
     # LOW_BALANCE — insufficient balance (15-25%, midpoint 20%)
     ("insufficient_funds", "Insufficient funds in account", FailureBucket.LOW_BALANCE, 0.15),
-    ("insufficient_balance", "Account balance lower than transaction amount", FailureBucket.LOW_BALANCE, 0.05),
-
+    (
+        "insufficient_balance",
+        "Account balance lower than transaction amount",
+        FailureBucket.LOW_BALANCE,
+        0.05,
+    ),
     # TECHNICAL — network/connectivity (10-15%, midpoint 12.5%)
-    ("connection_error", "Network connection lost during transaction", FailureBucket.TECHNICAL, 0.07),
+    (
+        "connection_error",
+        "Network connection lost during transaction",
+        FailureBucket.TECHNICAL,
+        0.07,
+    ),
     ("upi_timeout", "UPI network timeout", FailureBucket.TECHNICAL, 0.055),
-
     # STOP — account blocked/deactivated (5-10%, midpoint 7.5%)
     ("account_closed", "Bank account has been closed", FailureBucket.STOP, 0.02),
     ("account_frozen", "Account frozen by bank", FailureBucket.STOP, 0.015),
@@ -103,7 +120,9 @@ def generate_batch(
         attempt = DebitAttempt(
             attempt_id=f"att_synthetic_{i:04d}",
             mandate_id=f"md_synthetic_{i % 100:03d}",  # 100 unique mandates, ~5 attempts each
-            amount=rng.choice([19900, 49900, 99900, 149900, 299900, 499900]),  # realistic amounts in paise
+            amount=rng.choice(
+                [19900, 49900, 99900, 149900, 299900, 499900]
+            ),  # realistic amounts in paise
             result="failed",
             error=ErrorDetail(
                 code=chosen_code,
@@ -142,6 +161,7 @@ def print_distribution(attempts: list[DebitAttempt]) -> None:
         if a.error:
             # Map code to bucket for counting
             from mandate_doctor.core.codes import lookup_bucket
+
             bucket, _ = lookup_bucket(a.error.code)
             if bucket:
                 bucket_counts[bucket.value] += 1
@@ -149,16 +169,16 @@ def print_distribution(attempts: list[DebitAttempt]) -> None:
 
     total = len(attempts)
     print(f"\nBatch size: {total}")
-    print(f"\nBy bucket:")
+    print("\nBy bucket:")
     for bucket, count in bucket_counts.most_common():
-        print(f"  {bucket}: {count} ({count/total*100:.1f}%)")
-    print(f"\nBy error code:")
+        print(f"  {bucket}: {count} ({count / total * 100:.1f}%)")
+    print("\nBy error code:")
     for code, count in code_counts.most_common():
-        print(f"  {code}: {count} ({count/total*100:.1f}%)")
+        print(f"  {code}: {count} ({count / total * 100:.1f}%)")
 
 
 if __name__ == "__main__":
     batch = generate_batch(size=500, seed=42)
     save_batch(batch, Path("eval/synthetic_batch.json"))
     print_distribution(batch)
-    print(f"\nSaved to eval/synthetic_batch.json")
+    print("\nSaved to eval/synthetic_batch.json")
