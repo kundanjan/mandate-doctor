@@ -55,6 +55,12 @@ class RetryBudget:
 retry_budget = RetryBudget()
 
 
+def reset_budget() -> None:
+    """Reset the global retry budget. Used in tests and new cycles."""
+    global retry_budget
+    retry_budget = RetryBudget()
+
+
 def decide(
     attempt: DebitAttempt,
     bucket: FailureBucket,
