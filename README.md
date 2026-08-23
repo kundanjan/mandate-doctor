@@ -10,6 +10,10 @@
 
 ## The Problem
 
+India runs ~1 billion UPI AutoPay debits every month. Bank approval rates are catastrophically low — SBI approves only 36.14% of 2.13B monthly attempts, Airtel Payments Bank just 10.49%. Each failed debit costs ₹250–500 + GST in bank return charges and triggers involuntary churn.
+
+Since Aug 2025, NPCI capped recovery at **1 attempt + max 3 retries per cycle**. But most recoverable debits historically succeeded between attempts 5–9. Brute-force retry is now illegal — merchants need intelligence, not volume.
+
 | Fact | Source |
 |---|---|
 | SBI: 2.13B AutoPay txns/month, only **36.14% approved** | [Mint, Oct 2025](https://www.livemint.com/companies/start-ups/upi-autopay-failures-recurring-payments-india-11759999218161.html) |
@@ -19,8 +23,10 @@
 | Most recoverable debits succeeded at **attempts 5–9** (now illegal) | Same |
 | Razorpay's Intelligent Retry recovers **only 8% more** | [Razorpay, Jun 2026](https://razorpay.com/blog/cheapest-payment-gateway-for-recurring-billing-e-nach-upi-autopay-and-subscription) |
 | ~50 lakh SIPs discontinued/month (SEBI: 3 failed = ceased) | [AMFI](https://www.amfiindia.com/articles/mutual-fund) |
-
-Full evidence dossier: [`buildathon-evidence.md`](buildathon-evidence.md) (29 primary sources, freshness-audited)
+| UPI AutoPay failure rates: **8–15%** vs 2–3% for card mandates | [productgrowth.in, Jun 2026](https://productgrowth.in/insights/fintech/upi-autopay-guide) |
+| Failure breakdown: bank timeout 35–45%, wrong PIN 20–30%, insufficient balance 15–25%, network 10–15%, account blocked 5–10% | [productgrowth.in](https://productgrowth.in/insights/fintech/upi-payment-success-rates/) citing NPCI OC-149 |
+| NPCI publishes per-bank BD/TD stats monthly | [NPCI BD/TD & Uptime](https://www.npci.org.in/statistics/bd-td-and-uptime) |
+| Razorpay error codes: `insufficient_funds`, `bank_technical_error`, `mandate_revoked`, etc. | [Razorpay Error Docs](https://razorpay.com/docs/errors/payments/list/) |
 
 ---
 
@@ -102,7 +108,7 @@ mandate-doctor/
 │   └── app.py               # Streamlit eval dashboard
 ├── docs/
 │   └── architecture.md      # Full system design with Mermaid diagrams
-└── buildathon-evidence.md   # Problem evidence (29 sources)
+└── pyproject.toml
 ```
 
 ---
