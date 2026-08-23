@@ -34,7 +34,7 @@ These sources establish that recurring-payment failures and recovery are materia
 | Razorpay documents payment failures, pending/halted states and fixed retry behavior | [Razorpay documentation](https://razorpay.com/docs/payments/subscriptions/payment-retries/) |
 | Razorpay documents error fields such as code, source, step and reason | [Razorpay error documentation](https://razorpay.com/docs/errors/payments/list/) |
 | Public engineering case studies report that payment timing can affect subscription recovery | [Stripe Smart Retries](https://stripe.com/blog/how-we-built-it-smart-retries), [Dropbox payment ML](https://dropbox.tech/machine-learning/optimizing-payments-with-machine-learning) |
-| NPCI publishes bank-level Business Decline, Technical Decline and uptime statistics | [NPCI BD/TD and Uptime](https://www.npci.org.in/statistics/bd-td-and-uptime) |
+| NPCI publishes bank-level Business Decline, Technical Decline statistics for AutoPay mandate execution | [NPCI UPI AutoPay Ecosystem Statistics](https://www.npci.org.in/product/ecosystem-statistics/autopay) |
 
 The public evidence supports testing a context-aware recovery policy. It does not justify claiming a guaranteed percentage increase.
 
@@ -230,7 +230,39 @@ No recovery target is hardcoded before measurement. If the confidence interval i
 
 ## Synthetic Data Contract
 
-The existing batch generator creates failed attempts. It is not sufficient to prove recovery uplift until an independent outcome environment is implemented.
+The batch generator reads a frozen NPCI calibration snapshot from `data/npci-autopay-execution-2026-07.csv`. It does not fetch live data at build time.
+
+### Why these parameters
+
+| Parameter | Value | Source | Retrieved |
+|---|---|---|---|
+| Weighted Approved % (top 50 remitter banks) | 22.95% | NPCI AutoPay Mandate Execution, Jul 2026 | 2026-08-23 |
+| Weighted BD % | 76.15% | Same | Same |
+| Weighted TD % | 0.90% | Same | Same |
+| Total execution volume (top 50) | 2,481.40 Mn | Same | Same |
+
+Source: [NPCI UPI AutoPay Ecosystem Statistics](https://www.npci.org.in/product/ecosystem-statistics/autopay), backed by the public JSON endpoint `GET /api/ecosystem-statistics/get-statistics?product_name=Autopay&tab_name=top50-remitter&type_name=execution&year=2026&month=Jul&page_no=1&sort_by=asc&size=50&locale=en`. Full provenance in [`data/README.md`](data/README.md).
+
+### What is calibrated vs assumed
+
+| Aspect | Calibrated from real data? | Detail |
+|---|---|---|
+| BD vs TD split per bank | Yes | Each bank's published Approved%, BD%, TD% drives the failure type |
+| Bank selection probability | Yes | Proportional to actual execution volume |
+| BD sub-composition (balance vs PIN vs closed) | No — evaluation assumption | NPCI publishes BD as one aggregate; sub-split is scenario-dependent |
+| Recovery probability after retry | No — evaluation assumption | Not published by any public source |
+| Regulatory constraints (retry cap, windows, limits) | Yes | OC-215A, RBI E-Mandate Framework 2026 |
+
+Four evaluation profiles test policy robustness across different BD compositions:
+
+| Profile | low_balance | ambiguous | stop_terminal | Purpose |
+|---|---:|---:|---:|---|
+| balanced | 55% | 30% | 15% | Baseline population estimate |
+| low_balance_heavy | 75% | 15% | 10% | Consumer-subscription-heavy merchant |
+| stop_heavy | 25% | 20% | 55% | High-churn or aged mandate book |
+| adversarial_generic | 40% | 35% | 25% | All codes are generic `payment_declined` with empty description; tests abstention behavior |
+
+The hidden ground truth label exists only inside the evaluation environment. It is never exposed to the recovery system.
 
 Each evaluation scenario will contain:
 
@@ -241,9 +273,9 @@ Each evaluation scenario will contain:
   "hidden_label_for_evaluation_only": "technical",
   "potential_outcomes": {},
   "source_basis": [
+    "NPCI AutoPay Mandate Execution Jul 2026",
     "Razorpay error schema",
-    "NPCI decline categories",
-    "published payment-retry evidence"
+    "NPCI decline categories"
   ],
   "assumptions": [
     "technical failures have a non-zero recovery probability after delay"
@@ -279,6 +311,10 @@ mandate-doctor/
 │   ├── generate_batch.py
 │   ├── outcome_environment.py       # planned
 │   └── harness.py                   # planned
+├── data/
+│   ├── README.md                    # Calibration source provenance
+│   ├── npci-autopay-execution-2026-07.csv
+│   └── npci-autopay-payer-psp-execution-2026-07.csv
 ├── dashboard/
 │   └── app.py                       # planned
 ├── docs/
