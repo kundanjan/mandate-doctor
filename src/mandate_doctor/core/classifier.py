@@ -76,7 +76,9 @@ def classify(attempt: DebitAttempt) -> tuple[FailureBucket, float, list[str], st
     # Step 2: Check for known patterns in error description
     bucket, confidence, signals = _score_from_description(attempt.error)
     if bucket is not None:
-        reasoning = f"Pattern match in error description → {bucket.value} (confidence: {confidence:.2f})"
+        reasoning = (
+            f"Pattern match in error description → {bucket.value} (confidence: {confidence:.2f})"
+        )
         logger.info(
             "classification_pattern_match",
             attempt_id=attempt.attempt_id,

@@ -10,20 +10,23 @@ This is the "AI at the edge" — rules handle known cases, LLM handles unknowns.
 from __future__ import annotations
 
 import json
+import os
+from typing import Any, cast
 
 import httpx
 import structlog
 
-from mandate_doctor.config import settings
 from mandate_doctor.core.models import FailureBucket
 
 logger = structlog.get_logger(__name__)
 
-CLASSIFICATION_PROMPT = """You are a payment failure classifier for Indian recurring payments (UPI AutoPay / e-NACH).
+CLASSIFICATION_PROMPT = """You classify failures in Indian recurring payments
+(UPI AutoPay / e-NACH).
 
 Given a failed debit attempt's error details, classify it into ONE of these buckets:
 
-- LOW_BALANCE: Customer's account has insufficient funds. Retryable — schedule retry near salary date.
+- LOW_BALANCE: Customer's account has insufficient funds. Retryable — schedule
+  retry near salary date.
 - TECHNICAL: Bank/server/network error, not the customer's fault. Retryable immediately.
 - STOP: Fraud suspected, mandate revoked/cancelled, account closed/frozen. NEVER retry.
 - AMBIGUOUS: Cannot determine from available information. Hold for human review.
@@ -113,8 +116,6 @@ async def _call_llm(prompt: str) -> str:
     - OpenAI: OPENAI_API_KEY + base_url=https://api.openai.com/v1
     - Any OpenAI-compatible: OPENAI_API_KEY + OPENAI_BASE_URL
     """
-    import os
-
     # OpenCode Zen takes priority if key is set
     opencode_key = os.getenv("OPENCODE_ZEN_API_KEY", "")
     if opencode_key:
@@ -147,5 +148,17 @@ async def _call_llm(prompt: str) -> str:
             },
         )
         resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
+        data = cast(dict[str, Any], resp.json())
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError("LLM response did not contain any choices")
+
+        message = choices[0].get("message")
+        if not isinstance(message, dict):
+            raise RuntimeError("LLM response did not contain a message")
+
+        content = message.get("content")
+        if not isinstance(content, str):
+            raise RuntimeError("LLM response did not contain text content")
+
+        return content.strip()
