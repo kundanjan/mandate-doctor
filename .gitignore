@@ -1,0 +1,42 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite3
+
+# Secrets
+*.pem
+*.key
+
+# Coverage
+htmlcov/
+.coverage
+coverage.xml
