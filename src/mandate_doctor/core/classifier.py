@@ -6,8 +6,12 @@ Classifies failed debit attempts into failure buckets:
 - STOP: never retry (fraud, revoked, closed)
 - AMBIGUOUS: hold for review, don't auto-act
 
-Uses deterministic lookup for known codes, weighted scorer for ambiguous cases.
-LLM only for free-form error text that doesn't match known patterns.
+Three layers:
+1. Deterministic lookup for known NPCI error codes (no AI needed)
+2. Pattern matching on error description keywords (no AI needed)
+3. LLM classification for truly unknown errors (AI at the edge)
+
+The AI only fires when rules can't decide — restraint is the signal.
 """
 
 from __future__ import annotations
