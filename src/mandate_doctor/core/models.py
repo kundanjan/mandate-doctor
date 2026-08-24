@@ -64,10 +64,16 @@ class ErrorDetail(BaseModel):
 
 
 class DebitAttempt(BaseModel):
-    """A single debit attempt against a mandate."""
+    """A single debit attempt against a mandate.
+
+    ``cycle_id`` identifies the billing cycle. NPCI OC-215A scopes the
+    retry cap (1 attempt + 3 retries) per mandate per cycle, so every
+    attempt must carry the cycle it belongs to.
+    """
 
     attempt_id: str
     mandate_id: str
+    cycle_id: str = "cycle_default"
     timestamp: datetime = Field(default_factory=datetime.now)
     amount: int  # in paise
     result: str = "failed"  # success, failed
