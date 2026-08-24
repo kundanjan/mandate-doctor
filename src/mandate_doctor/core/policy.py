@@ -1,10 +1,18 @@
 """Policy engine — the bounded/gated decision layer.
 
-Enforces NPCI's 1+3 retry cap per mandate per cycle.
-Maps failure buckets to actions with timing and escalation rules.
+Enforces NPCI's retry cap per mandate per cycle.
 
-This is the fail-safe: even if the classifier is wrong,
-the policy engine prevents retry-budget violations.
+Regulatory basis: NPCI Circular OC-215A/2025-26, dated 21 May 2025,
+effective 1 Aug 2025. Verbatim rule: "Maximum of 1 attempt and 3 retries
+per mandate (per sequence number) shall be permitted."
+
+The original attempt is implied by the failure event itself — the system
+only decides what happens AFTER that original attempt failed. Therefore
+the budget tracks retries only: exactly 3 retries are allowed after the
+original attempt. A fourth retry must be rejected.
+
+This is the fail-safe: even if the classifier is wrong, the policy
+engine prevents retry-budget violations.
 """
 
 from __future__ import annotations
@@ -20,35 +28,39 @@ from mandate_doctor.core.models import (
 
 logger = structlog.get_logger(__name__)
 
-# NPCI cap: 1 original attempt + max 3 retries per cycle
-MAX_ATTEMPTS_PER_CYCLE = 4
+# NPCI OC-215A: 1 original attempt + 3 retries per mandate per cycle.
+# The original attempt already happened (that is why we are deciding),
+# so this constant is the number of RETRIES permitted after it.
+MAX_RETRIES_AFTER_ORIGINAL = 3
 
 
 class RetryBudget:
-    """Tracks retry attempts per mandate per cycle.
+    """Tracks retries consumed per (mandate, cycle).
 
-    Enforces NPCI's hard cap regardless of classifier confidence.
+    Keyed by (mandate_id, cycle_id) because the NPCI cap resets each
+    billing cycle. The original attempt is not counted here — it is
+    the event that brought the system to a decision in the first place.
     """
 
-    def __init__(self, max_attempts: int = MAX_ATTEMPTS_PER_CYCLE):
-        self._max = max_attempts
-        self._used: dict[str, int] = {}  # mandate_id → attempts used
+    def __init__(self, max_retries: int = MAX_RETRIES_AFTER_ORIGINAL):
+        self._max_retries = max_retries
+        self._used: dict[tuple[str, str], int] = {}
 
-    def remaining(self, mandate_id: str) -> int:
-        """How many attempts remain for this mandate in the current cycle."""
-        used = self._used.get(mandate_id, 0)
-        return max(0, self._max - used)
+    def remaining_retries(self, mandate_id: str, cycle_id: str) -> int:
+        """Retries still permitted for this mandate in this cycle."""
+        used = self._used.get((mandate_id, cycle_id), 0)
+        return max(0, self._max_retries - used)
 
-    def consume(self, mandate_id: str) -> bool:
-        """Consume one attempt. Returns False if budget exhausted."""
-        if self.remaining(mandate_id) <= 0:
+    def consume_retry(self, mandate_id: str, cycle_id: str) -> bool:
+        """Consume one retry slot. Returns False if exhausted."""
+        if self.remaining_retries(mandate_id, cycle_id) <= 0:
             return False
-        self._used[mandate_id] = self._used.get(mandate_id, 0) + 1
+        self._used[(mandate_id, cycle_id)] = self._used.get((mandate_id, cycle_id), 0) + 1
         return True
 
-    def reset(self, mandate_id: str) -> None:
-        """Reset budget for a new cycle."""
-        self._used.pop(mandate_id, None)
+    def reset_cycle(self, mandate_id: str, cycle_id: str) -> None:
+        """Clear the budget for a fresh billing cycle."""
+        self._used.pop((mandate_id, cycle_id), None)
 
 
 # Global retry budget instance
@@ -70,16 +82,18 @@ def decide(
 ) -> Decision:
     """Make a decision based on the classification and retry budget.
 
-    Returns a Decision with action, reasoning, and remaining budget.
+    Returns a Decision with action, reasoning, and remaining retries.
     """
     mandate_id = attempt.mandate_id
-    remaining = retry_budget.remaining(mandate_id)
+    cycle_id = attempt.cycle_id
+    remaining = retry_budget.remaining_retries(mandate_id, cycle_id)
 
-    # Fail-safe: if budget is exhausted, no action regardless of bucket
+    # Fail-safe: if no retries remain, hold regardless of bucket.
     if remaining <= 0:
         logger.warn(
             "budget_exhausted",
             mandate_id=mandate_id,
+            cycle_id=cycle_id,
             attempt_id=attempt.attempt_id,
             bucket=bucket.value,
         )
@@ -91,19 +105,20 @@ def decide(
             signals_used=signals,
             action_taken=Action.HOLD_FOR_REVIEW,
             reasoning=(
-                f"{reasoning} | Budget exhausted "
-                f"({MAX_ATTEMPTS_PER_CYCLE}/{MAX_ATTEMPTS_PER_CYCLE} used)"
+                f"{reasoning} | Retry budget exhausted "
+                f"({MAX_RETRIES_AFTER_ORIGINAL}/{MAX_RETRIES_AFTER_ORIGINAL} "
+                "retries used after original attempt)"
             ),
             retry_budget_remaining=0,
         )
 
-    # Map bucket → action
+    # Map bucket to action.
     action = _bucket_to_action(bucket)
 
-    # Consume budget for retry actions
+    # Consume a retry slot only for retry actions.
     if action in (Action.SCHEDULE_RETRY, Action.RETRY_IMMEDIATELY):
-        retry_budget.consume(mandate_id)
-        remaining = retry_budget.remaining(mandate_id)
+        retry_budget.consume_retry(mandate_id, cycle_id)
+        remaining = retry_budget.remaining_retries(mandate_id, cycle_id)
 
     decision = Decision(
         attempt_id=attempt.attempt_id,
@@ -119,6 +134,7 @@ def decide(
     logger.info(
         "decision_made",
         mandate_id=mandate_id,
+        cycle_id=cycle_id,
         attempt_id=attempt.attempt_id,
         bucket=bucket.value,
         action=action.value,
