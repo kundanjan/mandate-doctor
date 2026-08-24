@@ -8,7 +8,6 @@ This is the deterministic classifier — no LLM needed for known codes.
 
 from mandate_doctor.core.models import FailureBucket
 
-
 # NPCI UPI AutoPay / e-NACH return codes → failure bucket
 # Codes are lowercase, matched against error.code field
 CODE_TO_BUCKET: dict[str, FailureBucket] = {
@@ -18,7 +17,6 @@ CODE_TO_BUCKET: dict[str, FailureBucket] = {
     "low_balance": FailureBucket.LOW_BALANCE,
     "account_balance_low": FailureBucket.LOW_BALANCE,
     "funds_insufficient": FailureBucket.LOW_BALANCE,
-
     # === TECHNICAL (retryable immediately, not customer's fault) ===
     "bank_technical_error": FailureBucket.TECHNICAL,
     "gateway_technical_error": FailureBucket.TECHNICAL,
@@ -31,7 +29,6 @@ CODE_TO_BUCKET: dict[str, FailureBucket] = {
     "system_error": FailureBucket.TECHNICAL,
     "temporary_failure": FailureBucket.TECHNICAL,
     "request_timeout": FailureBucket.TECHNICAL,
-
     # === STOP (never retry — fraud, revoked, closed) ===
     "mandate_revoked": FailureBucket.STOP,
     "mandate_expired": FailureBucket.STOP,
@@ -50,7 +47,6 @@ CODE_TO_BUCKET: dict[str, FailureBucket] = {
     "stolen_card": FailureBucket.STOP,
     "pickup_card": FailureBucket.STOP,
     "closed_account": FailureBucket.STOP,
-
     # === CUSTOMER ACTION NEEDED (not retryable, needs intervention) ===
     "invalid_vpa": FailureBucket.AMBIGUOUS,
     "invalid_upi_pin": FailureBucket.AMBIGUOUS,
