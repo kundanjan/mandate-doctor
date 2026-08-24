@@ -1,7 +1,5 @@
 """Tests for the failure classifier."""
 
-import pytest
-
 from mandate_doctor.core.classifier import classify
 from mandate_doctor.core.models import DebitAttempt, ErrorDetail, FailureBucket
 
@@ -63,7 +61,9 @@ class TestPatternMatching:
     """Tests for description-based pattern matching."""
 
     def test_balance_keyword_in_description(self):
-        attempt = _make_attempt("unknown_code", "Transaction failed: insufficient balance in account")
+        attempt = _make_attempt(
+            "unknown_code", "Transaction failed: insufficient balance in account"
+        )
         bucket, confidence, signals, _ = classify(attempt)
         assert bucket == FailureBucket.LOW_BALANCE
         assert "description_balance_keyword" in signals

@@ -9,13 +9,12 @@ Three core objects:
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class MandateStatus(str, Enum):
+class MandateStatus(StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
     REVOKED = "revoked"
@@ -23,14 +22,14 @@ class MandateStatus(str, Enum):
     HALTED = "halted"
 
 
-class FailureBucket(str, Enum):
+class FailureBucket(StrEnum):
     LOW_BALANCE = "low_balance"
     TECHNICAL = "technical"
     STOP = "stop"
     AMBIGUOUS = "ambiguous"
 
 
-class Action(str, Enum):
+class Action(StrEnum):
     SCHEDULE_RETRY = "schedule_retry"
     RETRY_IMMEDIATELY = "retry_immediately"
     SEND_PAYMENT_LINK = "send_payment_link"
@@ -49,7 +48,7 @@ class Mandate(BaseModel):
     frequency: str  # monthly, weekly, daily
     status: MandateStatus = MandateStatus.ACTIVE
     registered_at: datetime = Field(default_factory=datetime.now)
-    bank: Optional[str] = None
+    bank: str | None = None
     payment_method: str = "upi"  # upi, enach, card
 
 
@@ -61,7 +60,7 @@ class ErrorDetail(BaseModel):
     source: str = "bank"  # bank, gateway, customer
     step: str = "payment"  # payment, authentication, authorization
     reason: str = ""
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class DebitAttempt(BaseModel):
@@ -72,7 +71,7 @@ class DebitAttempt(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     amount: int  # in paise
     result: str = "failed"  # success, failed
-    error: Optional[ErrorDetail] = None
+    error: ErrorDetail | None = None
     is_synthetic: bool = False  # True for enriched UPI test-mode events
 
 
@@ -87,7 +86,7 @@ class Decision(BaseModel):
     action_taken: Action
     reasoning: str = ""  # human-readable explanation
     retry_budget_remaining: int = 0
-    outcome: Optional[str] = None  # resolved, escalated, expired
+    outcome: str | None = None  # resolved, escalated, expired
     timestamp: datetime = Field(default_factory=datetime.now)
 
 

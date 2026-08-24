@@ -13,8 +13,8 @@ import structlog
 
 from mandate_doctor.core.models import (
     Action,
-    Decision,
     DebitAttempt,
+    Decision,
     FailureBucket,
 )
 
@@ -90,7 +90,10 @@ def decide(
             confidence=confidence,
             signals_used=signals,
             action_taken=Action.HOLD_FOR_REVIEW,
-            reasoning=f"{reasoning} | Budget exhausted ({MAX_ATTEMPTS_PER_CYCLE}/{MAX_ATTEMPTS_PER_CYCLE} used)",
+            reasoning=(
+                f"{reasoning} | Budget exhausted "
+                f"({MAX_ATTEMPTS_PER_CYCLE}/{MAX_ATTEMPTS_PER_CYCLE} used)"
+            ),
             retry_budget_remaining=0,
         )
 

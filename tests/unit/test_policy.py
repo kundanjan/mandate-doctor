@@ -1,7 +1,5 @@
 """Tests for the policy engine and retry budget."""
 
-import pytest
-
 from mandate_doctor.core.models import (
     Action,
     DebitAttempt,
@@ -84,6 +82,7 @@ class TestDecisions:
         budget = RetryBudget(max_attempts=1)
         # Monkey-patch the global budget for this test
         import mandate_doctor.core.policy as policy_module
+
         original = policy_module.retry_budget
         policy_module.retry_budget = budget
 

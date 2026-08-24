@@ -1,119 +1,276 @@
-"""Synthetic batch generator for evaluation.
+"""NPCI-calibrated synthetic batch generator for evaluation.
 
-Generates 500 DebitAttempts with realistic NPCI return-code distributions.
+Generates DebitAttempt objects whose failure distribution is calibrated
+against frozen NPCI AutoPay Mandate Execution statistics.
 
-Distribution sources:
-- productgrowth.in (updated Jun 2026): typical merchant-side UPI failure breakdown
-  from fintech audits, sourced from NPCI Circular OC-149 and NPCI BD/TD statistics
-  https://productgrowth.in/insights/fintech/upi-payment-success-rates/
-- Razorpay official error codes: github.com/razorpay/markdown-docs/blob/master/errors/payments/list.md
-- NPCI per-bank BD/TD data: npci.org.in/statistics/bd-td-and-uptime
+Calibration source:
+    data/npci-autopay-execution-2026-07.csv
+    NPCI UPI AutoPay Ecosystem Statistics, July 2026, Top 50 remitter banks.
+    Retrieved 2026-08-23. See data/README.md for full provenance.
 
-Distribution (based on industry data):
-- Bank server timeout: 35-45% → TECHNICAL
-- Wrong UPI PIN / exceeded attempts: 20-30% → AMBIGUOUS
-- Insufficient balance: 15-25% → LOW_BALANCE
-- Network/connectivity issues: 10-15% → TECHNICAL
-- Account blocked/deactivated: 5-10% → STOP
+What is calibrated from real data:
+    - Per-bank Approved%, BD%, TD% (volume-weighted across 50 banks)
+    - Bank selection probability proportional to execution volume
 
-We use the midpoint of each range, normalized to 100%.
+What is NOT calibrated (evaluation assumptions only):
+    - Sub-category composition within BD. NPCI publishes BD as a single
+      aggregate that includes insufficient funds, invalid PIN, limits
+      exceeded, account blocked/closed/frozen, and other business reasons.
+      The split of BD into LOW_BALANCE vs AMBIGUOUS vs STOP sub-categories
+      is an evaluation assumption, not a published statistic.
+    - Recovery probabilities after a retry action.
+
+The hidden ground truth label exists only inside the evaluation environment.
+It is never exposed to the recovery system.
 """
 
 from __future__ import annotations
 
+import csv
 import json
 import random
+from collections import Counter
 from pathlib import Path
 
-from mandate_doctor.core.models import DebitAttempt, ErrorDetail, FailureBucket
+from mandate_doctor.core.models import DebitAttempt, ErrorDetail
 
-# Distribution based on productgrowth.in industry benchmarks
-# Each entry: (error_code, description, source_bucket, weight)
-DISTRIBUTION: list[tuple[str, str, FailureBucket, float]] = [
-    # TECHNICAL — bank server timeout (35-45%, midpoint 40%)
-    ("bank_technical_error", "Bank server timeout during payment processing", FailureBucket.TECHNICAL, 0.25),
-    ("timeout", "Payment gateway request timed out", FailureBucket.TECHNICAL, 0.10),
-    ("gateway_technical_error", "Gateway technical error", FailureBucket.TECHNICAL, 0.05),
+# ---------------------------------------------------------------------------
+# Frozen calibration file paths
+# ---------------------------------------------------------------------------
 
-    # AMBIGUOUS — wrong UPI PIN / exceeded attempts (20-30%, midpoint 25%)
-    ("invalid_upi_pin", "Incorrect UPI PIN entered", FailureBucket.AMBIGUOUS, 0.10),
-    ("incorrect_pin", "Wrong PIN provided for authentication", FailureBucket.AMBIGUOUS, 0.05),
-    ("pin_attempts_exceeded", "Maximum PIN attempts exceeded", FailureBucket.AMBIGUOUS, 0.05),
-    ("authentication_failed", "3D secure or OTP authentication failed", FailureBucket.AMBIGUOUS, 0.05),
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+REMITTER_CSV = DATA_DIR / "npci-autopay-execution-2026-07.csv"
 
-    # LOW_BALANCE — insufficient balance (15-25%, midpoint 20%)
-    ("insufficient_funds", "Insufficient funds in account", FailureBucket.LOW_BALANCE, 0.15),
-    ("insufficient_balance", "Account balance lower than transaction amount", FailureBucket.LOW_BALANCE, 0.05),
+# ---------------------------------------------------------------------------
+# Evaluation-mode scenario profiles
+#
+# These control how the aggregate BD bucket is decomposed into sub-categories
+# for evaluation purposes. They are NOT calibrated from public data because
+# NPCI does not publish BD sub-composition. Each profile represents a plausible
+# merchant population; running the harness across all profiles tests policy
+# robustness rather than relying on one favorable distribution.
+#
+# Keys are FailureBucket values. Values are conditional probabilities within BD.
+# TD is handled separately using the real calibrated TD percentage.
+# ---------------------------------------------------------------------------
 
-    # TECHNICAL — network/connectivity (10-15%, midpoint 12.5%)
-    ("connection_error", "Network connection lost during transaction", FailureBucket.TECHNICAL, 0.07),
-    ("upi_timeout", "UPI network timeout", FailureBucket.TECHNICAL, 0.055),
+SCENARIO_PROFILES: dict[str, dict[str, float]] = {
+    "balanced": {
+        "low_balance": 0.55,
+        "ambiguous_customer_action": 0.30,
+        "stop_terminal": 0.15,
+    },
+    "low_balance_heavy": {
+        "low_balance": 0.75,
+        "ambiguous_customer_action": 0.15,
+        "stop_terminal": 0.10,
+    },
+    "stop_heavy": {
+        "low_balance": 0.25,
+        "ambiguous_customer_action": 0.20,
+        "stop_terminal": 0.55,
+    },
+    "adversarial_generic": {
+        # All failures return generic `payment_declined` with no description.
+        # The classifier must abstain on most of these.
+        "low_balance": 0.40,
+        "ambiguous_customer_action": 0.35,
+        "stop_terminal": 0.25,
+    },
+}
 
-    # STOP — account blocked/deactivated (5-10%, midpoint 7.5%)
-    ("account_closed", "Bank account has been closed", FailureBucket.STOP, 0.02),
-    ("account_frozen", "Account frozen by bank", FailureBucket.STOP, 0.015),
-    ("mandate_revoked", "Mandate revoked by customer", FailureBucket.STOP, 0.015),
-    ("fraud_suspected", "Transaction flagged as potentially fraudulent", FailureBucket.STOP, 0.01),
-    ("mandate_expired", "Mandate validity period has expired", FailureBucket.STOP, 0.01),
-    ("do_not_honor", "Bank declined the transaction", FailureBucket.STOP, 0.005),
+# ---------------------------------------------------------------------------
+# Error-code pools per hidden ground-truth category
+# ---------------------------------------------------------------------------
+
+TECHNICAL_CODES = [
+    ("bank_technical_error", "Bank server timeout during payment processing"),
+    ("timeout", "Payment gateway request timed out"),
 ]
 
-# Razorpay error source/step mapping (from official docs)
-ERROR_SOURCES = {
-    FailureBucket.TECHNICAL: ("bank", "payment"),
-    FailureBucket.AMBIGUOUS: ("customer", "authentication"),
-    FailureBucket.LOW_BALANCE: ("bank", "payment"),
-    FailureBucket.STOP: ("bank", "authorization"),
-}
+BD_LOW_BALANCE_CODES = [
+    ("insufficient_funds", "Insufficient funds in account"),
+    ("insufficient_balance", "Account balance lower than transaction amount"),
+]
+
+BD_AMBIGUOUS_CODES = [
+    ("invalid_upi_pin", "Incorrect UPI PIN entered"),
+    ("pin_attempts_exceeded", "Maximum PIN attempts exceeded"),
+    ("authentication_failed", "Authentication failed"),
+]
+
+BD_STOP_CODES = [
+    ("account_closed", "Bank account has been closed"),
+    ("mandate_revoked", "Mandate revoked by customer"),
+    ("fraud_suspected", "Transaction flagged as potentially fraudulent"),
+]
+
+# Generic decline used in the adversarial profile
+GENERIC_DECLINE = ("payment_declined", "")
+
+AMOUNTS_PAISE = [19_900, 49_900, 99_900, 149_900, 299_900, 499_900]
+
+
+# ---------------------------------------------------------------------------
+# Calibration loading
+# ---------------------------------------------------------------------------
+
+
+def load_bank_calibration(
+    csv_path: Path | None = None,
+) -> list[dict[str, str | float]]:
+    """Load bank-level Approved/BD/TD calibration from the frozen CSV.
+
+    Returns a list of dicts with keys:
+        bank: str
+        volume_mn: float
+        approved_pct: float
+        bd_pct: float
+        td_pct: float
+    """
+    path = csv_path or REMITTER_CSV
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Calibration CSV not found: {path}. "
+            "Run the snapshot download script or check data/README.md."
+        )
+
+    rows_by_bank: dict[str, dict[str, str]] = {}
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            bank = row["remitter_bank"]
+            if bank not in rows_by_bank:
+                rows_by_bank[bank] = {"bank": bank}
+            rows_by_bank[bank][row["category"]] = row["value"]
+
+    result = []
+    for entry in rows_by_bank.values():
+        result.append(
+            {
+                "bank": entry["bank"],
+                "volume_mn": float(entry["Total Volume"]),
+                "approved_pct": float(entry["Approved"]),
+                "bd_pct": float(entry["BD"]),
+                "td_pct": float(entry["TD"]),
+            }
+        )
+    return result
+
+
+def compute_weighted_aggregates(
+    banks: list[dict[str, str | float]],
+) -> dict[str, float]:
+    """Compute volume-weighted Approved/BD/TD percentages across all banks."""
+    total_volume = sum(float(b["volume_mn"]) for b in banks)
+    if total_volume == 0:
+        raise ValueError("Total volume is zero; cannot compute weighted aggregates.")
+
+    def weighted(key: str) -> float:
+        return sum(float(b["volume_mn"]) * float(b[key]) for b in banks) / total_volume
+
+    return {
+        "approved_pct": weighted("approved_pct"),
+        "bd_pct": weighted("bd_pct"),
+        "td_pct": weighted("td_pct"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Batch generation
+# ---------------------------------------------------------------------------
 
 
 def generate_batch(
     size: int = 500,
     seed: int = 42,
+    scenario: str = "balanced",
+    csv_path: Path | None = None,
 ) -> list[DebitAttempt]:
-    """Generate a synthetic batch of failed debit attempts.
+    """Generate a synthetic batch calibrated against NPCI July 2026 data.
 
     Args:
-        size: Number of attempts to generate
-        seed: Random seed for reproducibility
+        size: Number of failed debit attempts to generate.
+        seed: Random seed for reproducibility.
+        scenario: Key into SCENARIO_PROFILES controlling BD sub-composition.
+        csv_path: Optional override path to the calibration CSV.
 
     Returns:
-        List of DebitAttempt objects with realistic error distributions
+        List of DebitAttempt objects with realistic error distributions.
     """
-    rng = random.Random(seed)
+    if scenario not in SCENARIO_PROFILES:
+        raise ValueError(
+            f"Unknown scenario '{scenario}'. Available: {list(SCENARIO_PROFILES.keys())}"
+        )
 
-    # Normalize weights
-    total_weight = sum(w for _, _, _, w in DISTRIBUTION)
-    normalized = [(code, desc, bucket, w / total_weight) for code, desc, bucket, w in DISTRIBUTION]
+    rng = random.Random(seed)
+    banks = load_bank_calibration(csv_path)
+    profile = SCENARIO_PROFILES[scenario]
+
+    # Build bank-selection weights proportional to volume
+    total_volume = sum(float(b["volume_mn"]) for b in banks)
+    bank_weights = [float(b["volume_mn"]) / total_volume for b in banks]
 
     attempts: list[DebitAttempt] = []
+
     for i in range(size):
-        # Pick error type based on weighted distribution
-        r = rng.random()
-        cumulative = 0.0
-        chosen_code, chosen_desc, chosen_bucket, _ = normalized[0]
-        for code, desc, bucket, weight in normalized:
-            cumulative += weight
-            if r <= cumulative:
-                chosen_code, chosen_desc, chosen_bucket = code, desc, bucket
-                break
+        # Select a bank weighted by its execution volume
+        bank = rng.choices(banks, weights=bank_weights, k=1)[0]
 
-        source, step = ERROR_SOURCES[chosen_bucket]
+        # Decide whether this attempt fails as TD or BD based on the bank's
+        # actual published rates among declined transactions
+        td_share = float(bank["td_pct"])
+        bd_share = float(bank["bd_pct"])
+        declined_total = td_share + bd_share
+        if declined_total <= 0:
+            # Skip banks with zero declines (should not happen in practice)
+            continue
 
-        attempt = DebitAttempt(
-            attempt_id=f"att_synthetic_{i:04d}",
-            mandate_id=f"md_synthetic_{i % 100:03d}",  # 100 unique mandates, ~5 attempts each
-            amount=rng.choice([19900, 49900, 99900, 149900, 299900, 499900]),  # realistic amounts in paise
-            result="failed",
-            error=ErrorDetail(
-                code=chosen_code,
-                description=chosen_desc,
-                source=source,
-                step=step,
-            ),
-            is_synthetic=True,
+        td_probability = td_share / declined_total
+
+        if rng.random() < td_probability:
+            # Technical decline — deterministic TECHNICAL bucket
+            code, description = rng.choice(TECHNICAL_CODES)
+            hidden_label = "technical"
+        else:
+            # Business decline — sub-category depends on the evaluation profile
+            r = rng.random()
+            cumulative = 0.0
+            hidden_label = "unknown"
+            for label_key, probability in profile.items():
+                cumulative += probability
+                if r <= cumulative:
+                    hidden_label = label_key
+                    break
+
+            if hidden_label == "low_balance":
+                code, description = rng.choice(BD_LOW_BALANCE_CODES)
+            elif hidden_label == "ambiguous_customer_action":
+                code, description = rng.choice(BD_AMBIGUOUS_CODES)
+            elif hidden_label == "stop_terminal":
+                code, description = rng.choice(BD_STOP_CODES)
+            else:
+                code, description = GENERIC_DECLINE
+
+        if scenario == "adversarial_generic":
+            # Override all codes with generic decline, no description
+            code, description = GENERIC_DECLINE
+
+        attempts.append(
+            DebitAttempt(
+                attempt_id=f"att_synthetic_{scenario[:4]}_{seed}_{i:04d}",
+                mandate_id=f"md_synthetic_{scenario[:4]}_{seed}_{i % 100:03d}",
+                amount=rng.choice(AMOUNTS_PAISE),
+                result="failed",
+                error=ErrorDetail(
+                    code=code,
+                    description=description,
+                    source="bank",
+                    step="payment",
+                ),
+                is_synthetic=True,
+            )
         )
-        attempts.append(attempt)
 
     return attempts
 
@@ -132,33 +289,46 @@ def load_batch(path: Path) -> list[DebitAttempt]:
 
 
 def print_distribution(attempts: list[DebitAttempt]) -> None:
-    """Print the actual distribution of the generated batch."""
-    from collections import Counter
-
+    """Print the observed distribution of the generated batch."""
     bucket_counts: Counter[str] = Counter()
     code_counts: Counter[str] = Counter()
 
     for a in attempts:
         if a.error:
-            # Map code to bucket for counting
             from mandate_doctor.core.codes import lookup_bucket
+
             bucket, _ = lookup_bucket(a.error.code)
             if bucket:
                 bucket_counts[bucket.value] += 1
+            else:
+                bucket_counts["unmapped"] += 1
             code_counts[a.error.code] += 1
 
     total = len(attempts)
     print(f"\nBatch size: {total}")
-    print(f"\nBy bucket:")
+    print("\nBy classifier-visible bucket:")
     for bucket, count in bucket_counts.most_common():
-        print(f"  {bucket}: {count} ({count/total*100:.1f}%)")
-    print(f"\nBy error code:")
+        print(f"  {bucket}: {count} ({count / total * 100:.1f}%)")
+    print("\nBy error code:")
     for code, count in code_counts.most_common():
-        print(f"  {code}: {count} ({count/total*100:.1f}%)")
+        print(f"  {code}: {count} ({count / total * 100:.1f}%)")
 
 
 if __name__ == "__main__":
-    batch = generate_batch(size=500, seed=42)
-    save_batch(batch, Path("eval/synthetic_batch.json"))
-    print_distribution(batch)
-    print(f"\nSaved to eval/synthetic_batch.json")
+    banks = load_bank_calibration()
+    agg = compute_weighted_aggregates(banks)
+    print("NPCI calibration loaded:")
+    print(f"  Banks: {len(banks)}")
+    print(f"  Weighted Approved: {agg['approved_pct']:.2f}%")
+    print(f"  Weighted BD:       {agg['bd_pct']:.2f}%")
+    print(f"  Weighted TD:       {agg['td_pct']:.2f}%")
+
+    for scenario_name in SCENARIO_PROFILES:
+        batch = generate_batch(size=500, seed=42, scenario=scenario_name)
+        print(f"\n{'=' * 50}")
+        print(f"Scenario: {scenario_name}")
+        print_distribution(batch)
+
+    output = generate_batch(size=500, seed=42, scenario="balanced")
+    save_batch(output, Path("eval/synthetic_batch.json"))
+    print("\nSaved balanced batch to eval/synthetic_batch.json")
