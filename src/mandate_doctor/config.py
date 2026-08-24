@@ -1,6 +1,10 @@
 """Application configuration loaded from environment variables."""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -30,6 +34,7 @@ class Settings(BaseSettings):
     max_retries_per_cycle: int = 3
     host: str = "0.0.0.0"
     port: int = 8000
+    project_root: Path = PROJECT_ROOT
 
     model_config = {
         "env_file": ".env",
