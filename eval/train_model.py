@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import structlog
@@ -34,7 +36,7 @@ LR = 0.1
 EPOCHS = 3000
 
 
-def load_rows(db_path: Path | None = None) -> list[dict]:
+def load_rows(db_path: Path | None = None) -> list[dict[str, Any]]:
     conn = sqlite3.connect(str(db_path or DB_PATH))
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
@@ -50,8 +52,8 @@ def load_rows(db_path: Path | None = None) -> list[dict]:
 
 
 def build_design(
-    rows: list[dict],
-) -> tuple[np.ndarray, np.ndarray, list[str], dict[str, dict[str, float]]]:
+    rows: list[dict[str, Any]],
+) -> tuple[np.ndarray, np.ndarray, list[str], dict[str, list[Any]]]:
     """One-hot categoricals + scaled numeric features.
 
     Returns X, y, feature_names, and the encoding maps (for the artifact).
@@ -65,7 +67,11 @@ def build_design(
     feature_names: list[str] = []
     columns: list[np.ndarray] = []
 
-    def add_onehot(name_prefix: str, values: list, getter) -> None:
+    def add_onehot(
+        name_prefix: str,
+        values: list[Any],
+        getter: Callable[[dict[str, Any]], Any],
+    ) -> None:
         for v in values:
             feature_names.append(f"{name_prefix}={v}")
             columns.append(np.array([1.0 if getter(r) == v else 0.0 for r in rows]))
@@ -82,7 +88,7 @@ def build_design(
     feature_names.append("intercept")
     columns.append(np.ones(len(rows)))
 
-    X = np.stack(columns, axis=1)
+    X: np.ndarray = np.stack(columns, axis=1)
     y = np.array([float(r["recovered"]) for r in rows])
     encoding = {
         "banks": banks,
@@ -95,7 +101,8 @@ def build_design(
 
 
 def sigmoid(z: np.ndarray) -> np.ndarray:
-    return 1.0 / (1.0 + np.exp(-np.clip(z, -30, 30)))
+    out: np.ndarray = 1.0 / (1.0 + np.exp(-np.clip(z, -30, 30)))
+    return out
 
 
 def fit_logistic(
@@ -116,12 +123,13 @@ def fit_logistic(
 
 
 def predict_proba(w: np.ndarray, X: np.ndarray) -> np.ndarray:
-    return sigmoid(X @ w)
+    z: np.ndarray = X @ w
+    return sigmoid(z)
 
 
 def kfold_metrics(
     X: np.ndarray, y: np.ndarray, k: int = 5, seed: int = RANDOM_SEED
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Stratified-ish k-fold via label-shuffled rounds; reports accuracy,
     precision, recall, and log-loss on held-out folds."""
     rng = np.random.default_rng(seed)
@@ -147,8 +155,13 @@ def kfold_metrics(
         eps = 1e-9
         losses.append(float(-np.mean(yt * np.log(p + eps) + (1 - yt) * np.log(1 - p + eps))))
     if not accs:
-        return {"cv_accuracy": 0.0, "cv_precision": 0.0, "cv_recall": 0.0,
-                "cv_logloss": 0.0, "folds": k}
+        return {
+            "cv_accuracy": 0.0,
+            "cv_precision": 0.0,
+            "cv_recall": 0.0,
+            "cv_logloss": 0.0,
+            "folds": k,
+        }
     return {
         "cv_accuracy": float(np.mean(accs)),
         "cv_precision": float(np.mean(precs)),
@@ -158,7 +171,7 @@ def kfold_metrics(
     }
 
 
-def train(db_path: Path | None = None, out_dir: Path | None = None) -> dict:
+def train(db_path: Path | None = None, out_dir: Path | None = None) -> dict[str, Any]:
     rows = load_rows(db_path)
     if len(rows) < 20:
         logger.warning("insufficient_data", rows=len(rows), minimum=20)
@@ -202,11 +215,62 @@ def train(db_path: Path | None = None, out_dir: Path | None = None) -> dict:
     return artifact
 
 
-def load_model(path: Path | None = None) -> dict:
-    return json.loads((path or MODELS_DIR / "recovery_model.json").read_text())
+def load_model(path: Path | None = None) -> dict[str, Any]:
+    loaded: dict[str, Any] = json.loads((path or MODELS_DIR / "recovery_model.json").read_text())
+    return loaded
 
 
-def score_row(model: dict, row: dict) -> float:
+def train_incremental(min_new_rows: int = 5) -> dict[str, Any]:
+    """Retrain only if enough NEW labeled rows arrived since the last run.
+
+    Stores every accepted model version under models/history/ and appends
+    a metrics line to models/training_log.jsonl, so training progress is
+    auditable and the policy engine always has the latest artifact.
+    """
+    log_path = MODELS_DIR / "training_log.jsonl"
+    rows = load_rows()
+    last_rows = 0
+    if log_path.exists():
+        lines = [ln for ln in log_path.read_text().splitlines() if ln.strip()]
+        if lines:
+            last_rows = int(json.loads(lines[-1]).get("rows", 0))
+    if log_path.exists() and len(rows) - last_rows < min_new_rows:
+        return {
+            "status": "skipped",
+            "reason": f"only {len(rows) - last_rows} new rows (< {min_new_rows})",
+            "rows": len(rows),
+            "last_trained_rows": last_rows,
+        }
+
+    artifact = train()
+    if artifact.get("status") != "ok":
+        return artifact
+
+    MODELS_DIR.mkdir(exist_ok=True)
+    hist_dir = MODELS_DIR / "history"
+    hist_dir.mkdir(exist_ok=True)
+    stamp = artifact["trained_at"].replace(":", "").replace("-", "").replace("+", "Z")
+    (hist_dir / f"recovery_model_{stamp}.json").write_text(json.dumps(artifact, indent=2))
+    m = artifact["metrics"]
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    "trained_at": artifact["trained_at"],
+                    "rows": m["rows"],
+                    "recovered": m["recovered"],
+                    "cv_accuracy": m["cv_accuracy"],
+                    "cv_precision": m["cv_precision"],
+                    "cv_recall": m["cv_recall"],
+                    "cv_logloss": m["cv_logloss"],
+                }
+            )
+            + "\n"
+        )
+    return artifact
+
+
+def score_row(model: dict[str, Any], row: dict[str, Any]) -> float:
     """P(recovered) for one feature row using the saved artifact."""
     enc = model["encoding"]
     names = model["feature_names"]
@@ -218,12 +282,13 @@ def score_row(model: dict, row: dict) -> float:
         return wmap.get(key, 0.0) if value in allowed else 0.0
 
     z = 0.0
-    z += onehot("bank", row.get("npci_bank", ""), enc["banks"])
-    z += onehot("err_class", row.get("error_class", ""), enc["classes"])
-    z += onehot("regime", row.get("regime", ""), enc["regimes"])
+    z += onehot("bank", row.get("npci_bank") or "", enc["banks"])
+    z += onehot("err_class", row.get("error_class") or "", enc["classes"])
+    z += onehot("regime", row.get("regime") or "", enc["regimes"])
     code = row.get("failure_error_code") or "NONE"
     z += onehot("fail_code", code, enc["err_codes"])
-    z += onehot("amount", row.get("amount_paise"), enc["amounts"])
+    amount = row.get("amount_paise")
+    z += onehot("amount", amount if amount is not None else "", enc["amounts"])
     z += wmap.get("retry_prior", 0.0) * float(row.get("retry_prior") or 0.0)
     z += wmap.get("intercept", 0.0)
     return float(sigmoid(np.array(z)))
