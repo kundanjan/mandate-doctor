@@ -99,6 +99,83 @@ async def get_bounce(reference_id: str) -> dict[str, Any]:
     return evidence
 
 
+@app.get("/api/stats")
+async def get_stats() -> dict[str, Any]:
+    """Aggregated outcome stats for the analytics dashboard."""
+    import sqlite3
+
+    db = settings.project_root / "data" / "training_data.db"
+    if not db.exists():
+        return {"status": "no_data"}
+
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+
+    def group(q: str) -> list[dict[str, Any]]:
+        return [dict(r) for r in conn.execute(q).fetchall()]
+
+    totals = dict(
+        conn.execute(
+            """
+        SELECT COUNT(*) AS n,
+               SUM(recovered) AS recovered,
+               SUM(error IS NULL AND assigned_click IS NOT NULL) AS clean,
+               SUM(failed_payment_id IS NOT NULL) AS with_evidence,
+               SUM(error IS NOT NULL) AS errored
+        FROM outcomes
+        """
+        ).fetchone()
+    )
+    by_regime = group(
+        """
+        SELECT regime, COUNT(*) AS n, SUM(recovered) AS recovered
+        FROM outcomes WHERE error IS NULL AND assigned_click IS NOT NULL
+        GROUP BY regime
+        """
+    )
+    by_class = group(
+        """
+        SELECT error_class, COUNT(*) AS n, SUM(recovered) AS recovered
+        FROM outcomes WHERE error IS NULL AND assigned_click IS NOT NULL
+        GROUP BY error_class
+        """
+    )
+    by_bank = group(
+        """
+        SELECT npci_bank, COUNT(*) AS n, SUM(recovered) AS recovered
+        FROM outcomes WHERE error IS NULL AND assigned_click IS NOT NULL
+        GROUP BY npci_bank ORDER BY n DESC LIMIT 8
+        """
+    )
+    by_amount = group(
+        """
+        SELECT amount_paise, COUNT(*) AS n, SUM(recovered) AS recovered
+        FROM outcomes WHERE error IS NULL AND assigned_click IS NOT NULL
+        GROUP BY amount_paise ORDER BY amount_paise
+        """
+    )
+    conn.close()
+
+    model_metrics = None
+    model_path = settings.project_root / "models" / "recovery_model.json"
+    if model_path.exists():
+        try:
+            artifact = json.loads(model_path.read_text())
+            model_metrics = artifact.get("metrics")
+        except Exception:  # noqa: BLE001 - dashboard must not crash on bad artifact
+            model_metrics = None
+
+    return {
+        "status": "ok",
+        "totals": totals,
+        "by_regime": by_regime,
+        "by_class": by_class,
+        "by_bank": by_bank,
+        "by_amount": by_amount,
+        "model": model_metrics,
+    }
+
+
 @app.get("/api/events")
 async def list_events() -> list[dict[str, str]]:
     return received_events

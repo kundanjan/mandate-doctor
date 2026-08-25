@@ -142,6 +142,59 @@
   .react-flow__controls-button:hover { background: #2a2d34; }
   .react-flow__minimap { background: var(--panel) !important; border: 1px solid var(--node-border); border-radius: 8px; }
 
+  /* ---------- View toggle ---------- */
+  .view-toggle {
+    display: flex; gap: 2px; background: #26282f; border: 1px solid #3a3d46;
+    border-radius: 8px; padding: 3px;
+  }
+  .view-btn {
+    background: none; border: none; color: #9aa3af; font-size: 12px;
+    font-weight: 700; padding: 6px 16px; border-radius: 6px; cursor: pointer;
+    transition: all .15s;
+  }
+  .view-btn.active { background: var(--accent); color: #fff; }
+  .view-btn:hover:not(.active) { color: #fff; }
+
+  /* ---------- Analytics view ---------- */
+  .stats-wrap { flex: 1; overflow-y: auto; padding: 20px 24px; }
+  .stats-empty { color: var(--muted); font-size: 14px; padding: 40px; text-align: center; }
+  .kpi-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px; margin-bottom: 20px;
+  }
+  .kpi {
+    background: var(--node); border: 1px solid var(--node-border);
+    border-radius: 12px; padding: 14px 16px; text-align: center;
+  }
+  .kpi b { font-size: 24px; font-weight: 800; display: block; font-variant-numeric: tabular-nums; }
+  .kpi small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .7px; }
+  .kpi.ok b { color: var(--ok); }
+  .kpi.err b { color: var(--err); }
+  .kpi.model { border-color: #5b4a8a; }
+  .kpi.model b { color: #c084fc; }
+  .charts {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 14px;
+  }
+  .chart-card {
+    background: var(--node); border: 1px solid var(--node-border);
+    border-radius: 12px; padding: 16px 18px;
+  }
+  .chart-card h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+    color: var(--muted); margin-bottom: 14px; font-weight: 700;
+  }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+  .bar-label {
+    width: 150px; font-size: 11.5px; color: #c8ccd4; text-align: right;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0;
+  }
+  .bar-track {
+    flex: 1; height: 14px; background: #2e3138; border-radius: 7px; overflow: hidden;
+  }
+  .bar-fill { height: 100%; border-radius: 7px; transition: width .5s ease; }
+  .bar-val { width: 110px; font-size: 10.5px; color: var(--muted); font-family: ui-monospace, monospace; }
+
   /* ---------- Resize controls ---------- */
   .react-flow__resize-control.line { border-color: var(--accent); }
   .react-flow__resize-control.handle {
@@ -365,6 +418,87 @@ function N8nNode({ data, selected }) {
 }
 const nodeTypes = { n8n: N8nNode };
 
+/* ================= Analytics view ================= */
+function BarRow({ label, value, max, sub, color }) {
+  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+  return html`
+    <div class="bar-row">
+      <span class="bar-label">${label}</span>
+      <div class="bar-track">
+        <div class="bar-fill" style=${{width: pct + '%', background: color || 'var(--accent2)'}}></div>
+      </div>
+      <span class="bar-val">${sub}</span>
+    </div>
+  `;
+}
+
+function AnalyticsView({ stats }) {
+  if (!stats || stats.status === 'no_data') {
+    return html`<div class="stats-wrap"><div class="stats-empty">No data yet — run a batch first.</div></div>`;
+  }
+  const t = stats.totals || {};
+  const n = t.n || 0;
+  const rec = t.recovered || 0;
+  const rate = n > 0 ? Math.round((rec / n) * 1000) / 10 : 0;
+  const model = stats.model;
+  const rateOf = (g) => g && g.n > 0 ? Math.round((g.recovered / g.n) * 100) : 0;
+
+  const maxBank = Math.max(1, ...(stats.by_bank || []).map(b => b.n));
+
+  return html`
+    <div class="stats-wrap">
+      <div class="kpi-grid">
+        <div class="kpi"><b>${n}</b><small>total scenarios</small></div>
+        <div class="kpi ok"><b>${rec}</b><small>recovered</small></div>
+        <div class="kpi ok"><b>${rate}%</b><small>recovery rate</small></div>
+        <div class="kpi"><b>${t.clean || 0}</b><small>clean rows</small></div>
+        <div class="kpi"><b>${t.with_evidence || 0}</b><small>real bounces captured</small></div>
+        <div class="kpi err"><b>${t.errored || 0}</b><small>errored</small></div>
+        ${model ? html`
+          <div class="kpi model"><b>${Math.round((model.cv_accuracy || 0) * 100)}%</b><small>model CV accuracy</small></div>
+          <div class="kpi model"><b>${model.rows || '–'}</b><small>model trained on</small></div>
+        ` : null}
+      </div>
+
+      <div class="charts">
+        <div class="chart-card">
+          <h3>Recovery rate by behavioral regime</h3>
+          ${(stats.by_regime || []).map(g => html`
+            <${BarRow} key=${g.regime} label=${g.regime} value=${rateOf(g)}
+              max=${100} sub=${`${g.recovered}/${g.n} · ${rateOf(g)}%`} color="#a78bfa" />
+          `)}
+        </div>
+
+        <div class="chart-card">
+          <h3>Recovery rate by error class</h3>
+          ${(stats.by_class || []).map(g => html`
+            <${BarRow} key=${g.error_class} label=${g.error_class.toUpperCase()} value=${rateOf(g)}
+              max=${100} sub=${`${g.recovered}/${g.n} · ${rateOf(g)}%`}
+              color=${g.error_class === 'td' ? '#2dd4bf' : '#f97316'} />
+          `)}
+        </div>
+
+        <div class="chart-card">
+          <h3>Volume by bank (top 8) — recovery / total</h3>
+          ${(stats.by_bank || []).map(b => html`
+            <${BarRow} key=${b.npci_bank} label=${b.npci_bank} value=${b.n}
+              max=${maxBank} sub=${`${b.recovered}/${b.n}`} color="#3b82f6" />
+          `)}
+        </div>
+
+        <div class="chart-card">
+          <h3>Recovery rate by amount</h3>
+          ${(stats.by_amount || []).map(a => html`
+            <${BarRow} key=${a.amount_paise} label=${'₹' + (a.amount_paise / 100).toLocaleString('en-IN')}
+              value=${rateOf(a)} max=${100}
+              sub=${`${a.recovered}/${a.n} · ${rateOf(a)}%`} color="#10b981" />
+          `)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 /* ================= App ================= */
 function App() {
   const [activeEdges, setActiveEdges] = React.useState([]);
@@ -386,6 +520,8 @@ function App() {
     (changes) => setNodes(nds => applyNodeChanges(changes, nds)), []
   );
   const [logs, setLogs] = React.useState([]);
+  const [view, setView] = React.useState('flow');
+  const [stats, setStats] = React.useState(null);
   const [nVal, setNVal] = React.useState(30);
   const [wVal, setWVal] = React.useState(2);
   const timers = React.useRef({});
@@ -557,6 +693,21 @@ function App() {
   };
 
   React.useEffect(() => {
+    if (view !== 'stats') return;
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch('/api/stats');
+        const d = await r.json();
+        if (alive) setStats(d);
+      } catch (e) { /* keep old stats */ }
+    };
+    load();
+    const t = setInterval(load, 15000);
+    return () => { alive = false; clearInterval(t); };
+  }, [view]);
+
+  React.useEffect(() => {
     const connect = () => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -602,6 +753,12 @@ function App() {
           <span class="name">Mandate Doctor</span>
           <span class="track">Track 03 · AI Revenue Recovery</span>
         </div>
+        <div class="view-toggle">
+          <button class=${`view-btn ${view === 'flow' ? 'active' : ''}`}
+            onClick=${() => setView('flow')}>Workflow</button>
+          <button class=${`view-btn ${view === 'stats' ? 'active' : ''}`}
+            onClick=${() => setView('stats')}>Dashboard</button>
+        </div>
         <div class="controls">
           <div class="ctl">
             <label for="nInput">Scenarios</label>
@@ -630,6 +787,7 @@ function App() {
       </header>
 
       <div class="body-row">
+        ${view === 'stats' ? html`<${AnalyticsView} stats=${stats} />` : html`
         <div class="flow-wrap">
           <${ReactFlow}
             nodes=${nodes}
@@ -695,6 +853,7 @@ function App() {
             `)}
           </div>
         </aside>
+        `}
       </div>
 
       <div id="ticker">${ticker}</div>
