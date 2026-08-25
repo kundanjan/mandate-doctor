@@ -248,7 +248,14 @@ async def collect_one(
             send_email=False,
         )
         row.order_id = debit_link.get("order_id")
-        await emit({"type": "step", "node": "order", "status": "ok", "detail": row.order_id})
+        await emit(
+            {
+                "type": "step",
+                "node": "order",
+                "status": "ok",
+                "detail": debit_link["id"],
+            }
+        )
 
         await pay_payment_link(
             context=context,
@@ -392,7 +399,7 @@ async def _poll_link(link_id: str, auth: tuple[str, str], timeout_s: float = 25.
                     return status
                 if status == "partially paid":
                     return status
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(3.0)
     return None
 
 
@@ -424,6 +431,7 @@ async def run_batch(
 
     async def worker(ctx_factory: Callable[[], Awaitable[BrowserContext]]) -> None:
         context = await ctx_factory()
+        await asyncio.sleep(random.uniform(1.0, 4.0))  # stagger starts
         try:
             while True:
                 try:
@@ -431,6 +439,7 @@ async def run_batch(
                 except asyncio.QueueEmpty:
                     return
                 assert scn is not None
+                await asyncio.sleep(random.uniform(2.0, 5.0))  # smooth API pressure
                 await emit(
                     {
                         "type": "scenario_start",
