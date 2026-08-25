@@ -50,9 +50,10 @@ class CaseResult:
 
 
 # v0 scheduling policy: bucket -> candidate retry days (0-based).
+# All retryable buckets use the full 3-retry budget, just at smarter times.
 # The estimator slice will replace this with data-driven windows.
 RETRY_SCHEDULE: dict = {
-    "technical": [0],
+    "technical": [0, 1, 2],
     "low_balance": [2, 4, 6],
 }
 

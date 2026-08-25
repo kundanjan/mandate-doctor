@@ -217,18 +217,104 @@ async def start_batch(req: BatchRequest) -> dict[str, Any]:
 
     async def _run() -> dict[str, int]:
         try:
-            return await run_batch(
+            result = await run_batch(
                 n=req.n,
                 workers=req.workers,
                 batch_id=batch_id,
                 db_path=settings.project_root / "data" / "training_data.db",
                 sink=bus,
             )
+            # incremental retrain on fresh labeled data
+            try:
+                await _train_now()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("post_batch_training_failed", error=str(exc))
+            return result
         finally:
             _batch_state.update(running=False, batch_id=None)
 
     _batch_task = asyncio.create_task(_run())
     return {"status": "started", "batch_id": batch_id, "n": req.n, "workers": req.workers}
+
+
+# --------------------------------------------------------------------------
+# Incremental model training
+# --------------------------------------------------------------------------
+
+_model_lock = asyncio.Lock()
+_trainer_task: asyncio.Task[None] | None = None
+
+
+async def _train_now() -> dict[str, Any]:
+    """Retrain in a worker thread; never blocks the event loop."""
+    from eval.train_model import train_incremental
+
+    async with _model_lock:
+        artifact = await asyncio.to_thread(train_incremental)
+    if artifact.get("status") == "ok":
+        await bus.publish(
+            {
+                "type": "model_trained",
+                "rows": artifact.get("metrics", {}).get("rows"),
+                "cv_accuracy": artifact.get("metrics", {}).get("cv_accuracy"),
+                "trained_at": artifact.get("trained_at"),
+            }
+        )
+    return artifact
+
+
+@app.post("/api/model/train")
+async def trigger_training() -> dict[str, Any]:
+    if _model_lock.locked():
+        raise HTTPException(status_code=409, detail="training already in progress")
+    return await _train_now()
+
+
+@app.get("/api/model/status")
+async def model_status() -> dict[str, Any]:
+    path = settings.project_root / "models" / "recovery_model.json"
+    if not path.exists():
+        return {"status": "no_model"}
+    artifact = json.loads(path.read_text())
+    return {
+        "status": "ok",
+        "trained_at": artifact.get("trained_at"),
+        "metrics": artifact.get("metrics"),
+    }
+
+
+async def _periodic_trainer() -> None:
+    from eval.train_model import train_incremental
+
+    await asyncio.sleep(90)  # warm-up
+    while True:
+        try:
+            async with _model_lock:
+                artifact = await asyncio.to_thread(train_incremental)
+            if artifact.get("status") == "ok":
+                await bus.publish(
+                    {
+                        "type": "model_trained",
+                        "rows": artifact.get("metrics", {}).get("rows"),
+                        "cv_accuracy": artifact.get("metrics", {}).get("cv_accuracy"),
+                        "trained_at": artifact.get("trained_at"),
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001 - trainer must never kill the server
+            logger.error("periodic_training_failed", error=str(exc))
+        await asyncio.sleep(900)  # every 15 minutes
+
+
+@app.on_event("startup")
+async def start_trainer() -> None:
+    global _trainer_task
+    _trainer_task = asyncio.create_task(_periodic_trainer())
+
+
+@app.on_event("shutdown")
+async def stop_trainer() -> None:
+    if _trainer_task is not None:
+        _trainer_task.cancel()
 
 
 @app.get("/api/batch/status")

@@ -294,7 +294,8 @@
     "react": "https://esm.sh/react@18.3.1",
     "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
     "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
-    "@xyflow/react": "https://esm.sh/@xyflow/react@12.3.5?external=react"
+    "@xyflow/react": "https://esm.sh/@xyflow/react@12.3.5?external=react",
+    "chart.js/auto": "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/auto/+esm"
   }
 }
 </script>
@@ -310,6 +311,7 @@ import {
   Handle, Position, MarkerType, applyNodeChanges, NodeResizer,
 } from '@xyflow/react';
 import htm from 'https://esm.sh/htm@3.1.1';
+import Chart from 'chart.js/auto';
 
 const html = htm.bind(React.createElement);
 
@@ -419,18 +421,23 @@ function N8nNode({ data, selected }) {
 const nodeTypes = { n8n: N8nNode };
 
 /* ================= Analytics view ================= */
-function BarRow({ label, value, max, sub, color }) {
-  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
-  return html`
-    <div class="bar-row">
-      <span class="bar-label">${label}</span>
-      <div class="bar-track">
-        <div class="bar-fill" style=${{width: pct + '%', background: color || 'var(--accent2)'}}></div>
-      </div>
-      <span class="bar-val">${sub}</span>
-    </div>
-  `;
+Chart.defaults.color = '#9aa3af';
+Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
+Chart.defaults.font.family = "'Inter', 'Segoe UI', system-ui, sans-serif";
+
+function CChart({ config, height }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!ref.current) return undefined;
+    const chart = new Chart(ref.current, config);
+    return () => chart.destroy();
+  }, [config]);
+  return html`<div style=${{position: 'relative', height: height || 230}}>
+    <canvas ref=${ref} />
+  </div>`;
 }
+
+const GRID = { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { font: {size: 10} } };
 
 function AnalyticsView({ stats }) {
   if (!stats || stats.status === 'no_data') {
@@ -441,9 +448,96 @@ function AnalyticsView({ stats }) {
   const rec = t.recovered || 0;
   const rate = n > 0 ? Math.round((rec / n) * 1000) / 10 : 0;
   const model = stats.model;
-  const rateOf = (g) => g && g.n > 0 ? Math.round((g.recovered / g.n) * 100) : 0;
 
-  const maxBank = Math.max(1, ...(stats.by_bank || []).map(b => b.n));
+  const doughnutCfg = React.useMemo(() => ({
+    type: 'doughnut',
+    data: {
+      labels: ['Recovered', 'Lost / errored'],
+      datasets: [{
+        data: [rec, Math.max(0, n - rec)],
+        backgroundColor: ['#22c55e', '#3a3d46'],
+        borderColor: '#1d1f24', borderWidth: 3, hoverOffset: 6,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '68%',
+      plugins: { legend: { position: 'bottom', labels: {boxWidth: 10, padding: 14} } },
+    },
+  }), [rec, n]);
+
+  const regimeCfg = React.useMemo(() => ({
+    type: 'bar',
+    data: {
+      labels: (stats.by_regime || []).map(g => g.regime),
+      datasets: [{
+        label: 'recovery %',
+        data: (stats.by_regime || []).map(g => g.n ? Math.round(g.recovered / g.n * 100) : 0),
+        backgroundColor: ['#f87171', '#60a5fa', '#4ade80'],
+        borderRadius: 8, barPercentage: 0.6,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, max: 100, ...GRID, ticks: {callback: v => v + '%', font: {size: 10}} }, x: GRID },
+    },
+  }), [stats]);
+
+  const classCfg = React.useMemo(() => ({
+    type: 'bar',
+    data: {
+      labels: (stats.by_class || []).map(g => g.error_class.toUpperCase()),
+      datasets: [{
+        label: 'recovery %',
+        data: (stats.by_class || []).map(g => g.n ? Math.round(g.recovered / g.n * 100) : 0),
+        backgroundColor: (stats.by_class || []).map(g => g.error_class === 'td' ? '#2dd4bf' : '#f97316'),
+        borderRadius: 8, barPercentage: 0.5,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, max: 100, ...GRID, ticks: {callback: v => v + '%', font: {size: 10}} }, y: GRID },
+    },
+  }), [stats]);
+
+  const bankCfg = React.useMemo(() => {
+    const banks = (stats.by_bank || []).slice().reverse();
+    return {
+      type: 'bar',
+      data: {
+        labels: banks.map(b => b.npci_bank),
+        datasets: [
+          { label: 'recovered', data: banks.map(b => b.recovered),
+            backgroundColor: '#22c55e', borderRadius: 5, barPercentage: 0.7 },
+          { label: 'lost', data: banks.map(b => b.n - b.recovered),
+            backgroundColor: '#3a3d46', borderRadius: 5, barPercentage: 0.7 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: { legend: { position: 'bottom', labels: {boxWidth: 10, padding: 12} } },
+        scales: { x: { stacked: true, ...GRID }, y: { stacked: true, grid: {display: false}, ticks: {font: {size: 10}} } },
+      },
+    };
+  }, [stats]);
+
+  const amountCfg = React.useMemo(() => ({
+    type: 'bar',
+    data: {
+      labels: (stats.by_amount || []).map(a => '₹' + (a.amount_paise / 100).toLocaleString('en-IN')),
+      datasets: [{
+        label: 'recovery %',
+        data: (stats.by_amount || []).map(a => a.n ? Math.round(a.recovered / a.n * 100) : 0),
+        backgroundColor: '#818cf8', borderRadius: 8, barPercentage: 0.55,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, max: 100, ...GRID, ticks: {callback: v => v + '%', font: {size: 10}} }, x: GRID },
+    },
+  }), [stats]);
 
   return html`
     <div class="stats-wrap">
@@ -462,37 +556,24 @@ function AnalyticsView({ stats }) {
 
       <div class="charts">
         <div class="chart-card">
-          <h3>Recovery rate by behavioral regime</h3>
-          ${(stats.by_regime || []).map(g => html`
-            <${BarRow} key=${g.regime} label=${g.regime} value=${rateOf(g)}
-              max=${100} sub=${`${g.recovered}/${g.n} · ${rateOf(g)}%`} color="#a78bfa" />
-          `)}
+          <h3>Overall outcomes</h3>
+          <${CChart} config=${doughnutCfg} height=${240} />
         </div>
-
+        <div class="chart-card">
+          <h3>Recovery rate by behavioral regime</h3>
+          <${CChart} config=${regimeCfg} />
+        </div>
         <div class="chart-card">
           <h3>Recovery rate by error class</h3>
-          ${(stats.by_class || []).map(g => html`
-            <${BarRow} key=${g.error_class} label=${g.error_class.toUpperCase()} value=${rateOf(g)}
-              max=${100} sub=${`${g.recovered}/${g.n} · ${rateOf(g)}%`}
-              color=${g.error_class === 'td' ? '#2dd4bf' : '#f97316'} />
-          `)}
+          <${CChart} config=${classCfg} height=${180} />
         </div>
-
         <div class="chart-card">
-          <h3>Volume by bank (top 8) — recovery / total</h3>
-          ${(stats.by_bank || []).map(b => html`
-            <${BarRow} key=${b.npci_bank} label=${b.npci_bank} value=${b.n}
-              max=${maxBank} sub=${`${b.recovered}/${b.n}`} color="#3b82f6" />
-          `)}
+          <h3>Volume by bank — recovered vs lost</h3>
+          <${CChart} config=${bankCfg} height=${300} />
         </div>
-
         <div class="chart-card">
           <h3>Recovery rate by amount</h3>
-          ${(stats.by_amount || []).map(a => html`
-            <${BarRow} key=${a.amount_paise} label=${'₹' + (a.amount_paise / 100).toLocaleString('en-IN')}
-              value=${rateOf(a)} max=${100}
-              sub=${`${a.recovered}/${a.n} · ${rateOf(a)}%`} color="#10b981" />
-          `)}
+          <${CChart} config=${amountCfg} />
         </div>
       </div>
     </div>

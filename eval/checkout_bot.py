@@ -20,8 +20,8 @@ from playwright.async_api import TimeoutError as PWTimeout
 
 logger = structlog.get_logger(__name__)
 
-CONTACT_TIMEOUT = 15_000
-BANK_PAGE_TIMEOUT = 20_000
+CONTACT_TIMEOUT = 25_000
+BANK_PAGE_TIMEOUT = 30_000
 
 # Razorpay's hosted checkout serves a different flow to Playwright's
 # default headless UA; a normal Chrome UA + phone viewport gets the
@@ -63,7 +63,7 @@ async def pay_payment_link(
     step = "goto"
     try:
         await _emit("goto", "running")
-        await page.goto(short_url, wait_until="domcontentloaded", timeout=45_000)
+        await page.goto(short_url, wait_until="domcontentloaded", timeout=60_000)
         await _emit("goto", "ok")
 
         # Mobile layout: link summary first, checkout opens after tapping
