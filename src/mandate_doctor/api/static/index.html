@@ -86,7 +86,7 @@
 
   /* ---------- n8n-style dark node ---------- */
   .rn {
-    background: var(--node); border-radius: 12px; width: 250px; padding: 14px 15px 12px;
+    background: var(--node); border-radius: 10px; width: 208px; padding: 10px 12px 9px;
     border: 2px solid var(--node-border);
     box-shadow: 0 2px 8px rgba(0,0,0,.35);
     display: flex; gap: 10px; align-items: flex-start;
@@ -94,24 +94,24 @@
   }
   .rn:hover { border-color: #4d515c; }
   .rn-icon {
-    width: 46px; height: 46px; border-radius: 11px; display: grid; place-items: center;
+    width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center;
     flex-shrink: 0; background: #31343d; border: 1.5px solid #3d414b;
   }
-  .rn-icon svg { width: 24px; height: 24px; fill: none; stroke-width: 2; }
+  .rn-icon svg { width: 19px; height: 19px; fill: none; stroke-width: 2; }
   .rn-body { flex: 1; min-width: 0; }
   .rn-step {
-    font-size: 11px; font-weight: 800; letter-spacing: 1.2px;
+    font-size: 10px; font-weight: 800; letter-spacing: 1px;
     text-transform: uppercase; margin-bottom: 1px;
   }
-  .rn-title { font-size: 15.5px; font-weight: 700; color: var(--text); }
-  .rn-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; font-family: ui-monospace, monospace; }
+  .rn-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .rn-sub { font-size: 10.5px; color: var(--muted); margin-top: 2px; font-family: ui-monospace, monospace; }
   .rn-meta { display: flex; align-items: center; gap: 6px; margin-top: 5px; height: 14px; }
-  .rn-count { font-size: 12.5px; font-weight: 700; color: #7ab8ff; font-variant-numeric: tabular-nums; }
+  .rn-count { font-size: 11.5px; font-weight: 700; color: #7ab8ff; font-variant-numeric: tabular-nums; }
   .rn-badge {
-    width: 19px; height: 19px; border-radius: 50%; margin-left: auto;
+    width: 16px; height: 16px; border-radius: 50%; margin-left: auto;
     display: grid; place-items: center; transition: all .2s;
   }
-  .rn-badge svg { width: 11px; height: 11px; }
+  .rn-badge svg { width: 9px; height: 9px; }
   .rn-badge.idle { border: 1.5px solid #4a4f59; background: transparent; }
   .rn-badge.ok { background: #16a34a; }
   .rn-badge.err { background: #dc2626; }
@@ -126,7 +126,7 @@
   @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.75); } }
 
   /* Edges */
-  .react-flow__edge-path { stroke: #565b66; stroke-width: 2.5; }
+  .react-flow__edge-path { stroke: #707686; stroke-width: 3; }
   .react-flow__edge.animated .react-flow__edge-path {
     stroke: var(--edge-active); stroke-dasharray: 8 6;
     animation: dashflow .45s linear infinite;
@@ -281,16 +281,16 @@ function Icon({ d, color }) {
 /* ================= Graph ================= */
 const NODE_DEFS = [
   { id: 'npci',     x: 0,   y: 0,   color: '#3b82f6', step: '01', icon: 'npci',    title: 'NPCI Calibration', sub: '50 banks · real Jul-2026 data' },
-  { id: 'designer', x: 310, y: 0,   color: '#a78bfa', step: '02', icon: 'designer', title: 'Scenario Designer', sub: 'bank · class · amount · regime' },
-  { id: 'order',    x: 620, y: 0,   color: '#f97316', step: '03', icon: 'order',   title: 'Debit Attempt',     sub: 'Phase A · forced real failure' },
-  { id: 'link',     x: 930, y: 0,   color: '#10b981', step: '04', icon: 'link',    title: 'Recovery Link',     sub: 'Phase B · zero retry budget' },
-  { id: 'bot',      x: 930, y: 240, color: '#22d3ee', step: '05', icon: 'bot',     title: 'Checkout Bot',      sub: 'Playwright · hosted checkout' },
-  { id: 'mock',     x: 620, y: 240, color: '#f59e0b', step: '06', icon: 'mock',    title: 'Mock Bank Gateway', sub: 'success / failure gate' },
-  { id: 'poll',     x: 310, y: 240, color: '#2dd4bf', step: '07', icon: 'poll',    title: 'Outcome Poller',    sub: 'GET /payment_links/:id' },
-  { id: 'store',    x: 0,   y: 240, color: '#818cf8', step: '08', icon: 'store',   title: 'SQLite Store',      sub: 'data/training_data.db' },
-  { id: 'webhook',  x: 0,   y: 480, color: '#fb7185', step: 'W1', icon: 'webhook', title: 'Webhook Receiver',  sub: 'HMAC-SHA256 · fail-closed' },
-  { id: 'bus',      x: 310, y: 480, color: '#facc15', step: 'W2', icon: 'bus',     title: 'Event Bus',         sub: 'WebSocket /ws fan-out' },
-  { id: 'stats',    x: 620, y: 480, color: '#c084fc', step: 'W3', icon: 'stats',   title: 'Batch Stats',       sub: 'recovered / lost / errors' },
+  { id: 'designer', x: 380, y: 0,   color: '#a78bfa', step: '02', icon: 'designer', title: 'Scenario Designer', sub: 'bank · class · amount · regime' },
+  { id: 'order',    x: 760, y: 0,   color: '#f97316', step: '03', icon: 'order',   title: 'Debit Attempt',     sub: 'Phase A · forced real failure' },
+  { id: 'link',    x: 1140, y: 0,   color: '#10b981', step: '04', icon: 'link',    title: 'Recovery Link',     sub: 'Phase B · zero retry budget' },
+  { id: 'bot',    x: 1140, y: 300, color: '#22d3ee', step: '05', icon: 'bot',     title: 'Checkout Bot',      sub: 'Playwright · hosted checkout' },
+  { id: 'mock',    x: 760, y: 300, color: '#f59e0b', step: '06', icon: 'mock',    title: 'Mock Bank Gateway', sub: 'success / failure gate' },
+  { id: 'poll',    x: 380, y: 300, color: '#2dd4bf', step: '07', icon: 'poll',    title: 'Outcome Poller',    sub: 'GET /payment_links/:id' },
+  { id: 'store',    x: 0, y: 300, color: '#818cf8', step: '08', icon: 'store',   title: 'SQLite Store',      sub: 'data/training_data.db' },
+  { id: 'webhook',  x: 0, y: 600, color: '#fb7185', step: 'W1', icon: 'webhook', title: 'Webhook Receiver',  sub: 'HMAC-SHA256 · fail-closed' },
+  { id: 'bus',    x: 380, y: 600, color: '#facc15', step: 'W2', icon: 'bus',     title: 'Event Bus',         sub: 'WebSocket /ws fan-out' },
+  { id: 'stats',   x: 760, y: 600, color: '#c084fc', step: 'W3', icon: 'stats',   title: 'Batch Stats',       sub: 'recovered / lost / errors' },
 ];
 const EDGE_LABELS = {
   'npci-designer': 'calibrates',
@@ -308,11 +308,11 @@ const EDGE_DEFS = [
   ['npci','designer', 'sr', 'tl'],
   ['designer','order', 'sr', 'tl'],
   ['order','link', 'sr', 'tl'],
-  ['link','bot', 'sr', 'tl'],
+  ['link','bot', 'sb', 'tt'],
   ['bot','mock', 'sl', 'tr'],
   ['mock','poll', 'sl', 'tr'],
   ['poll','store', 'sl', 'tr'],
-  ['store','stats', 'sr', 'tl'],
+  ['store','stats', 'sb', 'tt'],
   ['webhook','bus', 'sr', 'tl'],
   ['bus','stats', 'sr', 'tl'],
 ];
@@ -346,6 +346,7 @@ function N8nNode({ data, selected }) {
         handleStyle=${{background: 'var(--accent)', width: 8, height: 8, borderRadius: 2}} />
       <${Handle} id="tl" type="target" position=${Position.Left} />
       <${Handle} id="tr" type="target" position=${Position.Right} />
+      <${Handle} id="tt" type="target" position=${Position.Top} />
       <div class="rn-icon" style=${tint}><${Icon} d=${ICONS[data.icon]} color=${data.color} /></div>
       <div class="rn-body">
         <div class="rn-step" style=${{ color: data.color }}>${data.step}</div>
@@ -358,6 +359,7 @@ function N8nNode({ data, selected }) {
       </div>
       <${Handle} id="sr" type="source" position=${Position.Right} />
       <${Handle} id="sl" type="source" position=${Position.Left} />
+      <${Handle} id="sb" type="source" position=${Position.Bottom} />
     </div>
   `;
 }
@@ -585,7 +587,7 @@ function App() {
       markerEnd: {
         type: MarkerType.ArrowClosed,
         color: active ? '#ff6d5a' : '#6b7280',
-        width: 18, height: 18,
+        width: 22, height: 22,
       },
     };
   }), [activeEdges]);
@@ -637,7 +639,7 @@ function App() {
             fitView
             fitViewOptions=${{padding: 0.12}}
             minZoom="0.2"
-            maxZoom="1.3"
+            maxZoom="1.0"
             proOptions=${{hideAttribution: true}}
           >
             <${Background} variant=${BackgroundVariant.Dots} gap="24" size="1.4" color="#2e3138" />
