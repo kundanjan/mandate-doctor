@@ -38,6 +38,11 @@ app.add_middleware(
 
 received_events: list[dict[str, str]] = []
 
+# Bounce evidence indexed by the payment's notes.reference_id. Populated
+# from payment.failed webhooks; consumed by the collector to attach the
+# REAL failed-payment id + error code to each dataset row.
+bounce_evidence: dict[str, dict[str, Any]] = {}
+
 _STATIC_DIR = settings.project_root / "src" / "mandate_doctor" / "api" / "static"
 
 
@@ -67,10 +72,31 @@ async def razorpay_webhook(request: Request) -> dict[str, Any]:
         "payment", {}
     ).get("entity", {}).get("id", "")
     received_events.append({"event_id": event_id, "type": event_type})
+
+    if event_type == "payment.failed":
+        pay = payload.get("payment", {}).get("entity", {})
+        ref = (pay.get("notes") or {}).get("reference_id", "")
+        if ref:
+            bounce_evidence[ref] = {
+                "payment_id": pay.get("id"),
+                "order_id": pay.get("order_id"),
+                "error_code": pay.get("error_code"),
+                "error_description": pay.get("error_description"),
+                "amount": pay.get("amount"),
+            }
+
     await bus.publish({"type": "webhook", "event_type": event_type, "entity_id": plink_id})
 
     logger.info("webhook_received", event_type=event_type, event_id=event_id)
     return {"status": "ok", "event_type": event_type}
+
+
+@app.get("/api/bounce/{reference_id}")
+async def get_bounce(reference_id: str) -> dict[str, Any]:
+    evidence = bounce_evidence.get(reference_id)
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="no bounce evidence for reference")
+    return evidence
 
 
 @app.get("/api/events")

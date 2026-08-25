@@ -41,3 +41,4 @@ htmlcov/
 .coverage
 coverage.xml
 gitcode/
+graphify-out/

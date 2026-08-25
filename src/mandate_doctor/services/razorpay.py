@@ -7,6 +7,9 @@ persisted beyond the process lifetime.
 
 from __future__ import annotations
 
+import asyncio
+import random
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -17,6 +20,12 @@ from mandate_doctor.config import settings
 logger = structlog.get_logger(__name__)
 
 BASE_URL = "https://api.razorpay.com/v1"
+
+# Rate-limit resilience: retry throttled/failed calls with exponential
+# backoff. Razorpay signals throttling as BAD_REQUEST_ERROR with a
+# "too many requests" description or HTTP 429.
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+_MAX_ATTEMPTS = 4
 
 
 class RazorpayError(Exception):
@@ -43,6 +52,33 @@ def _auth() -> tuple[str, str]:
     return (key_id, key_secret)
 
 
+def _is_retryable(err: RazorpayError) -> bool:
+    if err.status_code in _RETRYABLE_STATUS:
+        return True
+    return "too many request" in err.description.lower()
+
+
+async def _with_retries(fn: Callable[[], Awaitable[Any]], *args: Any, **kwargs: Any) -> Any:
+    last_exc: RazorpayError | None = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            return await fn(*args, **kwargs)
+        except RazorpayError as exc:
+            if not _is_retryable(exc) or attempt == _MAX_ATTEMPTS - 1:
+                raise
+            delay = (2**attempt) + random.uniform(0, 0.5)
+            logger.warning(
+                "razorpay_retry",
+                fn=fn.__name__ if hasattr(fn, "__name__") else "call",
+                attempt=attempt + 1,
+                delay_s=round(delay, 2),
+                code=exc.error_code,
+            )
+            last_exc = exc
+            await asyncio.sleep(delay)
+    raise last_exc  # type: ignore[misc]  # pragma: no cover
+
+
 async def create_order(
     amount_paise: int,
     receipt: str,
@@ -53,17 +89,22 @@ async def create_order(
     Returns the raw API response dict with keys including
     id, amount, currency, status, receipt.
     """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{BASE_URL}/orders",
-            auth=_auth(),
-            json={
-                "amount": amount_paise,
-                "currency": currency,
-                "receipt": receipt,
-            },
-        )
-        return _handle_response(resp)
+
+    async def _call() -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{BASE_URL}/orders",
+                auth=_auth(),
+                json={
+                    "amount": amount_paise,
+                    "currency": currency,
+                    "receipt": receipt,
+                },
+            )
+            return _handle_response(resp)
+
+    result: dict[str, Any] = await _with_retries(_call)
+    return result
 
 
 async def create_payment_link(
@@ -81,47 +122,87 @@ async def create_payment_link(
     Returns the raw API response dict with keys including
     id, short_url, amount, status, reference_id.
     """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{BASE_URL}/payment_links",
-            auth=_auth(),
-            json={
-                "amount": amount_paise,
-                "currency": "INR",
-                "accept_partial": False,
-                "reference_id": reference_id,
-                "description": description,
-                "customer": {
-                    "name": customer_name,
-                    "email": customer_email,
-                    "contact": customer_contact,
+
+    async def _call() -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{BASE_URL}/payment_links",
+                auth=_auth(),
+                json={
+                    "amount": amount_paise,
+                    "currency": "INR",
+                    "accept_partial": False,
+                    "reference_id": reference_id,
+                    "description": description,
+                    "customer": {
+                        "name": customer_name,
+                        "email": customer_email,
+                        "contact": customer_contact,
+                    },
+                    "notify": {"sms": send_sms, "email": send_email},
+                    "reminder_enable": False,
+                    "notes": {
+                        "source": "mandate_doctor",
+                        "reference_id": reference_id,
+                    },
                 },
-                "notify": {"sms": send_sms, "email": send_email},
-                "reminder_enable": False,
-                "notes": {"source": "mandate_doctor", "reference_id": reference_id},
-            },
-        )
-        return _handle_response(resp)
+            )
+            return _handle_response(resp)
+
+    result: dict[str, Any] = await _with_retries(_call)
+    return result
+
+
+async def fetch_order_payments(order_id: str) -> list[dict[str, Any]]:
+    """Fetch all payment attempts made against an order.
+
+    Used to capture the REAL error code from a failed debit attempt.
+    """
+
+    async def _call() -> list[dict[str, Any]]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{BASE_URL}/orders/{order_id}/payments",
+                auth=_auth(),
+            )
+            if resp.status_code == 200:
+                items: list[dict[str, Any]] = resp.json().get("items", [])
+                return items
+            _handle_response(resp)
+            return []  # pragma: no cover
+
+    result: list[dict[str, Any]] = await _with_retries(_call)
+    return result
 
 
 async def fetch_payment_link(link_id: str) -> dict[str, Any]:
     """Fetch a Payment Link by ID to check its current status."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{BASE_URL}/payment_links/{link_id}",
-            auth=_auth(),
-        )
-        return _handle_response(resp)
+
+    async def _call() -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{BASE_URL}/payment_links/{link_id}",
+                auth=_auth(),
+            )
+            return _handle_response(resp)
+
+    result: dict[str, Any] = await _with_retries(_call)
+    return result
 
 
 async def fetch_payment(payment_id: str) -> dict[str, Any]:
     """Fetch a payment by ID to check its status."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{BASE_URL}/payments/{payment_id}",
-            auth=_auth(),
-        )
-        return _handle_response(resp)
+
+    async def _call() -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{BASE_URL}/payments/{payment_id}",
+                auth=_auth(),
+            )
+            return _handle_response(resp)
+
+    result: dict[str, Any] = await _with_retries(_call)
+    return result
 
 
 def _handle_response(resp: httpx.Response) -> dict[str, Any]:

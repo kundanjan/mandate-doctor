@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import csv
 import hashlib
 import json
@@ -43,7 +44,6 @@ from mandate_doctor.api.events import EventSink
 from mandate_doctor.config import settings
 from mandate_doctor.services.razorpay import (
     RazorpayError,
-    create_order,
     create_payment_link,
 )
 
@@ -54,6 +54,7 @@ NPCI_CSV = DATA_DIR / "npci-autopay-execution-2026-07.csv"
 DEFAULT_DB = DATA_DIR / "training_data.db"
 
 BASE_URL = "https://api.razorpay.com/v1"
+LOCAL_API = "http://localhost:8000"
 
 # Fixed subscription price points (paise). Part of experiment design.
 AMOUNTS_PAISE = [19_900, 49_900, 99_900, 149_900, 299_900]
@@ -71,6 +72,7 @@ class BankWeights(TypedDict):
     bank: str
     declined_volume: float
     bd_share: float
+    approved_pct: float
 
 
 class Scenario(TypedDict):
@@ -80,6 +82,7 @@ class Scenario(TypedDict):
     error_class: str
     amount_paise: int
     regime: str
+    retry_prior: float
 
 
 @dataclass(slots=True)
@@ -99,6 +102,9 @@ class ScenarioRow:
     poll_status: str | None
     error: str | None
     created_at: str
+    failed_payment_id: str | None = None
+    failure_error_code: str | None = None
+    retry_prior: float | None = None
 
 
 def load_bank_weights(csv_path: Path | None = None) -> list[BankWeights]:
@@ -123,6 +129,7 @@ def load_bank_weights(csv_path: Path | None = None) -> list[BankWeights]:
                 "bank": name,
                 "declined_volume": volume * (bd + td) / 100.0,
                 "bd_share": bd / (bd + td) if (bd + td) > 0 else 0.5,
+                "approved_pct": max(0.0, 100.0 - bd - td),
             }
         )
     banks.sort(key=lambda b: b["declined_volume"], reverse=True)
@@ -153,6 +160,14 @@ def init_db(db_path: Path) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_outcomes_batch ON outcomes(batch_id);
         """
     )
+    # v2 columns (two-phase: real bounce + retry prior); tolerate re-runs
+    for stmt in (
+        "ALTER TABLE outcomes ADD COLUMN failed_payment_id TEXT",
+        "ALTER TABLE outcomes ADD COLUMN failure_error_code TEXT",
+        "ALTER TABLE outcomes ADD COLUMN retry_prior REAL",
+    ):
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute(stmt)
     conn.commit()
     return conn
 
@@ -176,29 +191,11 @@ def design_scenario(
         "scenario_key": key,
         "npci_bank": bank["bank"],
         "rzp_bank": rzp_bank,
+        "retry_prior": bank["approved_pct"] / 100.0,
         "error_class": error_class,
         "amount_paise": rng.choice(AMOUNTS_PAISE),
         "regime": rng.choice(list(REGIMES)),
     }
-
-
-async def create_scenario_resources(
-    scn: Scenario, batch_id: str
-) -> tuple[str | None, str | None, str | None]:
-    """Create a real order + payment link for this scenario."""
-    order = await create_order(
-        amount_paise=scn["amount_paise"],
-        receipt=f"md_{scn['scenario_key']}",
-    )
-    reference_id = scn["scenario_key"]
-    link = await create_payment_link(
-        amount_paise=scn["amount_paise"],
-        reference_id=reference_id,
-        description=f"Recovery {scn['error_class'].upper()} {scn['npci_bank']}",
-        send_sms=False,
-        send_email=False,
-    )
-    return order["id"], link["id"], link["short_url"]
 
 
 async def collect_one(
@@ -228,15 +225,77 @@ async def collect_one(
         recovered=0,
         poll_status=None,
         error=None,
+        retry_prior=scn["retry_prior"],
         created_at=now,
     )
 
     try:
+
+        async def _on_step(step: str, status: str) -> None:
+            await emit({"type": "step", "node": f"bot_{step}", "status": status})
+
+        # ---- PHASE A: the mandate debit bounce (real failed payment) ----
+        # Test mode cannot execute a server-side mandate debit, so the
+        # debit attempt uses the closest executable vehicle: a checkout
+        # session that FAILS. The failure is a real Razorpay payment
+        # with a real error code, captured below.
         await emit({"type": "step", "node": "order", "status": "running"})
-        order_id, plink_id, short_url = await create_scenario_resources(scn, batch_id)
-        row.order_id, row.plink_id, row.short_url = order_id, plink_id, short_url
-        await emit({"type": "step", "node": "order", "status": "ok", "detail": order_id})
-        await emit({"type": "step", "node": "link", "status": "ok", "detail": plink_id})
+        debit_link = await create_payment_link(
+            amount_paise=scn["amount_paise"],
+            reference_id=f"{scn['scenario_key']}_debit",
+            description=f"Debit attempt {scn['error_class'].upper()} {scn['npci_bank']}",
+            send_sms=False,
+            send_email=False,
+        )
+        row.order_id = debit_link.get("order_id")
+        await emit({"type": "step", "node": "order", "status": "ok", "detail": row.order_id})
+
+        await pay_payment_link(
+            context=context,
+            short_url=debit_link["short_url"],
+            mobile="9820123456",
+            bank_label=scn["rzp_bank"],
+            succeed=False,  # the bounce
+            on_step=_on_step,
+        )
+
+        # Capture the REAL failure evidence: the payment.failed webhook
+        # (HMAC-verified by the API server) is indexed by reference_id.
+        evidence = await _wait_for_bounce_evidence(f"{scn['scenario_key']}_debit", timeout_s=20.0)
+        if evidence is not None:
+            row.order_id = evidence.get("order_id")
+            row.failed_payment_id = evidence.get("payment_id")
+            row.failure_error_code = evidence.get("error_code") or evidence.get("error_description")
+            await emit(
+                {
+                    "type": "step",
+                    "node": "bounce",
+                    "status": "ok",
+                    "detail": f"{row.failed_payment_id} · {row.failure_error_code}",
+                }
+            )
+        else:
+            await emit(
+                {
+                    "type": "step",
+                    "node": "bounce",
+                    "status": "error",
+                    "detail": "no webhook evidence received",
+                }
+            )
+
+        # ---- PHASE B: recovery intervention (payment link) ----
+        await emit({"type": "step", "node": "link", "status": "running"})
+        link = await create_payment_link(
+            amount_paise=scn["amount_paise"],
+            reference_id=scn["scenario_key"],
+            description=f"Recovery {scn['error_class'].upper()} {scn['npci_bank']}",
+            send_sms=False,
+            send_email=False,
+        )
+        row.plink_id = link["id"]
+        row.short_url = link["short_url"]
+        await emit({"type": "step", "node": "link", "status": "ok", "detail": link["id"]})
 
         # Treatment assignment: does the simulated payer complete payment?
         # Regime is an explicitly labeled factor; the draw is deterministic
@@ -244,29 +303,38 @@ async def collect_one(
         pays = _draw(scn["scenario_key"], f"pays|{scn['regime']}") < REGIMES[scn["regime"]]
         row.assigned_click = "success" if pays else "failure"
 
-        async def _on_step(step: str, status: str) -> None:
-            await emit({"type": "step", "node": f"bot_{step}", "status": status})
-
-        await pay_payment_link(
+        bot_outcome = await pay_payment_link(
             context=context,
-            short_url=short_url or "",
+            short_url=row.short_url or "",
             mobile="9820123456",
             bank_label=scn["rzp_bank"],
             succeed=pays,
             on_step=_on_step,
         )
+        if bot_outcome == "timeout":
+            row.error = "checkout_timeout"
+            await emit({"type": "step", "node": "bot", "status": "timeout"})
+            return row
 
         # Measure truth from the API, not from what we clicked. Failure
         # clicks keep the link in "created" — one confirmation poll
         # suffices; success clicks need up to 25s for the capture chain.
         await emit({"type": "step", "node": "poll", "status": "running"})
         status = await _poll_link(
-            plink_id or "",
+            row.plink_id or "",
             auth,
             timeout_s=25.0 if pays else 6.0,
         )
         row.poll_status = status
         row.recovered = 1 if status == "paid" else 0
+
+        # Final chance: webhook delivery may have lagged the whole run.
+        if row.failed_payment_id is None:
+            late = await _wait_for_bounce_evidence(f"{scn['scenario_key']}_debit", timeout_s=8.0)
+            if late is not None:
+                row.order_id = late.get("order_id")
+                row.failed_payment_id = late.get("payment_id")
+                row.failure_error_code = late.get("error_code")
         await emit(
             {"type": "step", "node": "poll", "status": "ok", "detail": status or "unconfirmed"}
         )
@@ -290,11 +358,34 @@ async def collect_one(
     return row
 
 
+async def _wait_for_bounce_evidence(
+    reference_id: str, timeout_s: float = 20.0
+) -> dict[str, Any] | None:
+    """Poll our own API server for the verified payment.failed evidence."""
+    deadline = time.monotonic() + timeout_s
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        while time.monotonic() < deadline:
+            try:
+                resp = await client.get(f"{LOCAL_API}/api/bounce/{reference_id}")
+            except httpx.HTTPError:
+                await asyncio.sleep(1.5)
+                continue
+            if resp.status_code == 200:
+                evidence: dict[str, Any] = resp.json()
+                return evidence
+            await asyncio.sleep(1.5)
+    return None
+
+
 async def _poll_link(link_id: str, auth: tuple[str, str], timeout_s: float = 25.0) -> str | None:
     deadline = time.monotonic() + timeout_s
     async with httpx.AsyncClient(timeout=10.0, auth=auth) as client:
         while time.monotonic() < deadline:
-            resp = await client.get(f"{BASE_URL}/payment_links/{link_id}")
+            try:
+                resp = await client.get(f"{BASE_URL}/payment_links/{link_id}")
+            except httpx.HTTPError:
+                await asyncio.sleep(2.0)
+                continue
             if resp.status_code == 200:
                 status: str = resp.json().get("status", "")
                 if status in ("paid", "expired", "cancelled"):
@@ -361,8 +452,9 @@ async def run_batch(
                     """INSERT OR REPLACE INTO outcomes
                        (scenario_key, batch_id, npci_bank, rzp_bank, error_class,
                         amount_paise, regime, order_id, plink_id, short_url,
-                        assigned_click, recovered, poll_status, error, created_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        assigned_click, recovered, poll_status, error, created_at,
+                        failed_payment_id, failure_error_code, retry_prior)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         row.scenario_key,
                         row.batch_id,
@@ -379,6 +471,9 @@ async def run_batch(
                         row.poll_status,
                         row.error,
                         row.created_at,
+                        row.failed_payment_id,
+                        row.failure_error_code,
+                        row.retry_prior,
                     ),
                 )
                 conn.commit()
