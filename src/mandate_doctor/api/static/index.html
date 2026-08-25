@@ -86,7 +86,7 @@
 
   /* ---------- n8n-style dark node ---------- */
   .rn {
-    background: var(--node); border-radius: 10px; width: 190px; padding: 10px 12px 8px;
+    background: var(--node); border-radius: 12px; width: 250px; padding: 14px 15px 12px;
     border: 2px solid var(--node-border);
     box-shadow: 0 2px 8px rgba(0,0,0,.35);
     display: flex; gap: 10px; align-items: flex-start;
@@ -94,27 +94,35 @@
   }
   .rn:hover { border-color: #4d515c; }
   .rn-icon {
-    width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
-    flex-shrink: 0; background: #31343d; border: 1px solid #3d414b;
+    width: 46px; height: 46px; border-radius: 11px; display: grid; place-items: center;
+    flex-shrink: 0; background: #31343d; border: 1.5px solid #3d414b;
   }
-  .rn-icon svg { width: 17px; height: 17px; stroke: #aeb4bf; fill: none; stroke-width: 1.8; }
+  .rn-icon svg { width: 24px; height: 24px; fill: none; stroke-width: 2; }
   .rn-body { flex: 1; min-width: 0; }
   .rn-step {
-    font-size: 8.5px; font-weight: 800; color: var(--accent); letter-spacing: 1px;
+    font-size: 11px; font-weight: 800; letter-spacing: 1.2px;
     text-transform: uppercase; margin-bottom: 1px;
   }
-  .rn-title { font-size: 12.5px; font-weight: 700; color: var(--text); }
-  .rn-sub { font-size: 9.5px; color: var(--muted); margin-top: 2px; font-family: ui-monospace, monospace; }
+  .rn-title { font-size: 15.5px; font-weight: 700; color: var(--text); }
+  .rn-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; font-family: ui-monospace, monospace; }
   .rn-meta { display: flex; align-items: center; gap: 6px; margin-top: 5px; height: 14px; }
-  .rn-count { font-size: 10px; font-weight: 700; color: #7ab8ff; font-variant-numeric: tabular-nums; }
-  .rn-dot { width: 8px; height: 8px; border-radius: 50%; background: #464a55; margin-left: auto; transition: background .2s; }
+  .rn-count { font-size: 12.5px; font-weight: 700; color: #7ab8ff; font-variant-numeric: tabular-nums; }
+  .rn-badge {
+    width: 19px; height: 19px; border-radius: 50%; margin-left: auto;
+    display: grid; place-items: center; transition: all .2s;
+  }
+  .rn-badge svg { width: 11px; height: 11px; }
+  .rn-badge.idle { border: 1.5px solid #4a4f59; background: transparent; }
+  .rn-badge.ok { background: #16a34a; }
+  .rn-badge.err { background: #dc2626; }
+  .rn-badge.running { background: var(--accent); animation: pulse .9s infinite; }
 
   .rn.running { border-color: var(--accent); box-shadow: 0 0 0 5px var(--accent-glow), 0 2px 12px rgba(0,0,0,.4); }
-  .rn.running .rn-dot { background: var(--accent); animation: pulse .9s infinite; }
+
   .rn.ok { border-color: #2f6b46; }
-  .rn.ok .rn-dot { background: var(--ok); }
+
   .rn.error { border-color: #7a3535; }
-  .rn.error .rn-dot { background: var(--err); }
+
   @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.75); } }
 
   /* Edges */
@@ -133,6 +141,13 @@
   }
   .react-flow__controls-button:hover { background: #2a2d34; }
   .react-flow__minimap { background: var(--panel) !important; border: 1px solid var(--node-border); border-radius: 8px; }
+
+  /* ---------- Resize controls ---------- */
+  .react-flow__resize-control.line { border-color: var(--accent); }
+  .react-flow__resize-control.handle {
+    background: var(--accent); border: none; width: 8px; height: 8px;
+    border-radius: 2px;
+  }
 
   /* ---------- Executions panel ---------- */
   aside {
@@ -239,7 +254,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, MiniMap,
-  Handle, Position, MarkerType,
+  Handle, Position, MarkerType, applyNodeChanges, NodeResizer,
 } from '@xyflow/react';
 import htm from 'https://esm.sh/htm@3.1.1';
 
@@ -259,28 +274,47 @@ const ICONS = {
   bus: 'M13 2 4 14h6l-1 8 9-12h-6l1-8Z',
   stats: 'M4 19V5M4 19h16M8 15v-4M12 15V8M16 15v-6',
 };
-function Icon({ d }) {
-  return html`<svg viewBox="0 0 24 24"><path d=${d} strokeLinecap="round" strokeLinejoin="round"/></svg>`;
+function Icon({ d, color }) {
+  return html`<svg viewBox="0 0 24 24" style=${{stroke: color || '#aeb4bf'}}><path d=${d} strokeLinecap="round" strokeLinejoin="round"/></svg>`;
 }
 
 /* ================= Graph ================= */
 const NODE_DEFS = [
-  { id: 'npci',     x: 0,     y: 0,   step: '01', icon: 'npci',    title: 'NPCI Calibration', sub: 'data/npci-2026-07.csv · 50 banks' },
-  { id: 'designer', x: 252,   y: 0,   step: '02', icon: 'designer', title: 'Scenario Designer', sub: 'bank · class · amount · regime' },
-  { id: 'order',    x: 504,   y: 0,   step: '03', icon: 'order',   title: 'Razorpay Order',    sub: 'POST /v1/orders' },
-  { id: 'link',     x: 756,   y: 0,   step: '04', icon: 'link',    title: 'Payment Link',      sub: 'POST /v1/payment_links' },
-  { id: 'bot',      x: 1008,  y: 0,   step: '05', icon: 'bot',     title: 'Checkout Bot',      sub: 'Playwright · hosted checkout' },
-  { id: 'mock',     x: 1260,  y: 0,   step: '06', icon: 'mock',    title: 'Mock Bank Gateway', sub: 'success / failure gate' },
-  { id: 'poll',     x: 1512,  y: 0,   step: '07', icon: 'poll',    title: 'Outcome Poller',    sub: 'GET /payment_links/:id' },
-  { id: 'store',    x: 1764,  y: 0,   step: '08', icon: 'store',   title: 'SQLite Store',      sub: 'data/training_data.db' },
-  { id: 'webhook',  x: 1008,  y: 220, step: 'W1', icon: 'webhook', title: 'Webhook Receiver',  sub: 'HMAC-SHA256 · fail-closed' },
-  { id: 'bus',      x: 1260,  y: 220, step: 'W2', icon: 'bus',     title: 'Event Bus',         sub: 'WebSocket /ws fan-out' },
-  { id: 'stats',    x: 1764,  y: 220, step: 'W3', icon: 'stats',   title: 'Batch Stats',       sub: 'recovered / lost / errors' },
+  { id: 'npci',     x: 0,   y: 0,   color: '#3b82f6', step: '01', icon: 'npci',    title: 'NPCI Calibration', sub: '50 banks · real Jul-2026 data' },
+  { id: 'designer', x: 310, y: 0,   color: '#a78bfa', step: '02', icon: 'designer', title: 'Scenario Designer', sub: 'bank · class · amount · regime' },
+  { id: 'order',    x: 620, y: 0,   color: '#f97316', step: '03', icon: 'order',   title: 'Debit Attempt',     sub: 'Phase A · forced real failure' },
+  { id: 'link',     x: 930, y: 0,   color: '#10b981', step: '04', icon: 'link',    title: 'Recovery Link',     sub: 'Phase B · zero retry budget' },
+  { id: 'bot',      x: 930, y: 240, color: '#22d3ee', step: '05', icon: 'bot',     title: 'Checkout Bot',      sub: 'Playwright · hosted checkout' },
+  { id: 'mock',     x: 620, y: 240, color: '#f59e0b', step: '06', icon: 'mock',    title: 'Mock Bank Gateway', sub: 'success / failure gate' },
+  { id: 'poll',     x: 310, y: 240, color: '#2dd4bf', step: '07', icon: 'poll',    title: 'Outcome Poller',    sub: 'GET /payment_links/:id' },
+  { id: 'store',    x: 0,   y: 240, color: '#818cf8', step: '08', icon: 'store',   title: 'SQLite Store',      sub: 'data/training_data.db' },
+  { id: 'webhook',  x: 0,   y: 480, color: '#fb7185', step: 'W1', icon: 'webhook', title: 'Webhook Receiver',  sub: 'HMAC-SHA256 · fail-closed' },
+  { id: 'bus',      x: 310, y: 480, color: '#facc15', step: 'W2', icon: 'bus',     title: 'Event Bus',         sub: 'WebSocket /ws fan-out' },
+  { id: 'stats',    x: 620, y: 480, color: '#c084fc', step: 'W3', icon: 'stats',   title: 'Batch Stats',       sub: 'recovered / lost / errors' },
 ];
+const EDGE_LABELS = {
+  'npci-designer': 'calibrates',
+  'designer-order': 'designs',
+  'order-link': 'after bounce',
+  'link-bot': 'opens',
+  'bot-mock': 'drives',
+  'mock-poll': 'yields',
+  'poll-store': 'writes',
+  'store-stats': 'aggregates',
+  'webhook-bus': 'verified',
+  'bus-stats': 'streams',
+};
 const EDGE_DEFS = [
-  ['npci','designer'], ['designer','order'], ['order','link'], ['link','bot'],
-  ['bot','mock'], ['mock','poll'], ['poll','store'], ['store','stats'],
-  ['webhook','bus'], ['bus','stats'],
+  ['npci','designer', 'sr', 'tl'],
+  ['designer','order', 'sr', 'tl'],
+  ['order','link', 'sr', 'tl'],
+  ['link','bot', 'sr', 'tl'],
+  ['bot','mock', 'sl', 'tr'],
+  ['mock','poll', 'sl', 'tr'],
+  ['poll','store', 'sl', 'tr'],
+  ['store','stats', 'sr', 'tl'],
+  ['webhook','bus', 'sr', 'tl'],
+  ['bus','stats', 'sr', 'tl'],
 ];
 const CHAIN = ['npci','designer','order','link','bot','mock','poll','store','stats'];
 const STAGE_TO_NODE = {
@@ -289,22 +323,41 @@ const STAGE_TO_NODE = {
 };
 
 /* ================= Custom node ================= */
-function N8nNode({ data }) {
+function StatusBadge({ status }) {
+  if (status === 'ok') {
+    return html`<span class="rn-badge ok"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
+  }
+  if (status === 'error') {
+    return html`<span class="rn-badge err"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/></svg></span>`;
+  }
+  if (status === 'running') {
+    return html`<span class="rn-badge running"></span>`;
+  }
+  return html`<span class="rn-badge idle"></span>`;
+}
+
+function N8nNode({ data, selected }) {
   const st = data.state;
+  const tint = { background: data.color + '22', borderColor: data.color + '55' };
   return html`
     <div class=${`rn ${st.status}`}>
-      <${Handle} type="target" position=${Position.Left} />
-      <div class="rn-icon"><${Icon} d=${ICONS[data.icon]} /></div>
+      <${NodeResizer} isVisible=${selected} minWidth=${170} minHeight=${70}
+        lineStyle=${{borderColor: 'var(--accent)'}}
+        handleStyle=${{background: 'var(--accent)', width: 8, height: 8, borderRadius: 2}} />
+      <${Handle} id="tl" type="target" position=${Position.Left} />
+      <${Handle} id="tr" type="target" position=${Position.Right} />
+      <div class="rn-icon" style=${tint}><${Icon} d=${ICONS[data.icon]} color=${data.color} /></div>
       <div class="rn-body">
-        <div class="rn-step">${data.step}</div>
+        <div class="rn-step" style=${{ color: data.color }}>${data.step}</div>
         <div class="rn-title">${data.title}</div>
         <div class="rn-sub">${data.sub}</div>
         <div class="rn-meta">
           <span class="rn-count">${st.count ? `×${st.count}` : ''}</span>
-          <span class="rn-dot"></span>
+          <${StatusBadge} status=${st.status} />
         </div>
       </div>
-      <${Handle} type="source" position=${Position.Right} />
+      <${Handle} id="sr" type="source" position=${Position.Right} />
+      <${Handle} id="sl" type="source" position=${Position.Left} />
     </div>
   `;
 }
@@ -312,7 +365,6 @@ const nodeTypes = { n8n: N8nNode };
 
 /* ================= App ================= */
 function App() {
-  const [nodeStates, setNodeStates] = React.useState({});
   const [activeEdges, setActiveEdges] = React.useState([]);
   const [execs, setExecs] = React.useState([]);
   const [counts, setCounts] = React.useState({done:0, recovered:0, errors:0});
@@ -322,6 +374,15 @@ function App() {
   const [ticker, setTicker] = React.useState('webhook feed idle…');
   const [toastMsg, setToastMsg] = React.useState('');
   const [tab, setTab] = React.useState('logs');
+  const [nodes, setNodes] = React.useState(() =>
+    NODE_DEFS.map(d => ({
+      id: d.id, type: 'n8n', position: {x: d.x, y: d.y},
+      data: {...d, state: {status: 'idle', count: 0}}, zIndex: 10,
+    }))
+  );
+  const onNodesChange = React.useCallback(
+    (changes) => setNodes(nds => applyNodeChanges(changes, nds)), []
+  );
   const [logs, setLogs] = React.useState([]);
   const [nVal, setNVal] = React.useState(30);
   const [wVal, setWVal] = React.useState(2);
@@ -342,17 +403,20 @@ function App() {
   }, []);
 
   const setNode = React.useCallback((id, status) => {
-    setNodeStates(prev => {
-      const cur = prev[id] || {status: 'idle', count: 0};
-      return { ...prev, [id]: {status, count: cur.count} };
-    });
+    setNodes(nds => nds.map(n =>
+      n.id === id
+        ? {...n, data: {...n.data, state: {...n.data.state, status}}}
+        : n
+    ));
   }, []);
 
   const bumpNode = React.useCallback((id) => {
-    setNodeStates(prev => {
-      const cur = prev[id] || {status: 'idle', count: 0};
-      return { ...prev, [id]: {status: cur.status, count: cur.count + 1} };
-    });
+    setNodes(nds => nds.map(n =>
+      n.id === id
+        ? {...n, data: {...n.data, state: {
+            ...n.data.state, count: (n.data.state?.count || 0) + 1}}}
+        : n
+    ));
   }, []);
 
   const showToast = (msg) => {
@@ -502,17 +566,18 @@ function App() {
     connect();
   }, [handle]);
 
-  const nodes = React.useMemo(() => NODE_DEFS.map(d => ({
-    id: d.id, type: 'n8n', position: {x: d.x, y: d.y},
-    data: {...d, state: nodeStates[d.id] || {status: 'idle', count: 0}},
-  })), [nodeStates]);
-
-  const edges = React.useMemo(() => EDGE_DEFS.map(([a, b]) => {
+  const edges = React.useMemo(() => EDGE_DEFS.map(([a, b, sh, th]) => {
     const active = activeEdges.includes(`${a}-${b}`);
     return {
       id: `${a}-${b}`, source: a, target: b,
+      sourceHandle: sh, targetHandle: th,
       type: 'smoothstep',
       animated: active,
+      label: EDGE_LABELS[`${a}-${b}`] || '',
+      labelStyle: {fill: active ? '#ffb0a3' : '#9aa3af', fontSize: 11, fontFamily: 'ui-monospace, monospace'},
+      labelBgStyle: {fill: '#1d1f24', fillOpacity: 0.92},
+      labelBgPadding: [5, 2],
+      labelBgBorderRadius: 4,
       style: {
         stroke: active ? '#ff6d5a' : '#565b66',
         strokeWidth: active ? 3 : 2.5,
@@ -566,12 +631,13 @@ function App() {
         <div class="flow-wrap">
           <${ReactFlow}
             nodes=${nodes}
+            onNodesChange=${onNodesChange}
             edges=${edges}
             nodeTypes=${nodeTypes}
             fitView
             fitViewOptions=${{padding: 0.12}}
-            minZoom="0.25"
-            maxZoom="1.8"
+            minZoom="0.2"
+            maxZoom="1.3"
             proOptions=${{hideAttribution: true}}
           >
             <${Background} variant=${BackgroundVariant.Dots} gap="24" size="1.4" color="#2e3138" />
@@ -583,12 +649,6 @@ function App() {
               style=${{borderRadius: 8, border: '1px solid #3a3d46'}}
             />
           <//>
-          <div class="legend">
-            <div class="li"><span class="sq" style=${{background: '#464a55'}}></span> idle</div>
-            <div class="li"><span class="sq" style=${{background: '#ff6d5a'}}></span> running</div>
-            <div class="li"><span class="sq" style=${{background: '#4ade80'}}></span> done</div>
-            <div class="li"><span class="sq" style=${{background: '#7ab8ff'}}></span> count</div>
-          </div>
         </div>
 
         <aside>
