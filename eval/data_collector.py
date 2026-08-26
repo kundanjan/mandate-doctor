@@ -54,6 +54,11 @@ NPCI_CSV = DATA_DIR / "npci-autopay-execution-2026-07.csv"
 DEFAULT_DB = DATA_DIR / "training_data.db"
 
 BASE_URL = "https://api.razorpay.com/v1"
+
+# v1: outcome depended only on the regime draw (no learnable feature
+# signal). v2: completion probability couples regime with the bank's
+# NPCI approval rate and an amount tier. Training uses v2+ rows only.
+DESIGN_VERSION = 2
 LOCAL_API = "http://localhost:8000"
 
 # Fixed subscription price points (paise). Part of experiment design.
@@ -105,6 +110,7 @@ class ScenarioRow:
     failed_payment_id: str | None = None
     failure_error_code: str | None = None
     retry_prior: float | None = None
+    design_version: int = 1
 
 
 def load_bank_weights(csv_path: Path | None = None) -> list[BankWeights]:
@@ -165,6 +171,7 @@ def init_db(db_path: Path) -> sqlite3.Connection:
         "ALTER TABLE outcomes ADD COLUMN failed_payment_id TEXT",
         "ALTER TABLE outcomes ADD COLUMN failure_error_code TEXT",
         "ALTER TABLE outcomes ADD COLUMN retry_prior REAL",
+        "ALTER TABLE outcomes ADD COLUMN design_version INTEGER DEFAULT 1",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(stmt)
@@ -227,6 +234,7 @@ async def collect_one(
         error=None,
         retry_prior=scn["retry_prior"],
         created_at=now,
+        design_version=DESIGN_VERSION,
     )
 
     async def _create_throttled(scn_key: str, phase: str) -> dict[str, Any]:
@@ -503,8 +511,9 @@ async def run_batch(
                        (scenario_key, batch_id, npci_bank, rzp_bank, error_class,
                         amount_paise, regime, order_id, plink_id, short_url,
                         assigned_click, recovered, poll_status, error, created_at,
-                        failed_payment_id, failure_error_code, retry_prior)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        failed_payment_id, failure_error_code, retry_prior,
+                        design_version)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         row.scenario_key,
                         row.batch_id,
@@ -524,6 +533,7 @@ async def run_batch(
                         row.failed_payment_id,
                         row.failure_error_code,
                         row.retry_prior,
+                        row.design_version,
                     ),
                 )
                 conn.commit()

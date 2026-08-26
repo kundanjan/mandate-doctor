@@ -36,17 +36,29 @@ LR = 0.1
 EPOCHS = 3000
 
 
-def load_rows(db_path: Path | None = None) -> list[dict[str, Any]]:
+def load_rows(db_path: Path | None = None, min_design_version: int = 2) -> list[dict[str, Any]]:
     conn = sqlite3.connect(str(db_path or DB_PATH))
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """
-        SELECT scenario_key, npci_bank, rzp_bank, error_class, amount_paise,
-               regime, failure_error_code, retry_prior, recovered
-        FROM outcomes
-        WHERE error IS NULL AND assigned_click IS NOT NULL
-        """
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            """
+            SELECT scenario_key, npci_bank, rzp_bank, error_class, amount_paise,
+                   regime, failure_error_code, retry_prior, recovered
+            FROM outcomes
+            WHERE error IS NULL AND assigned_click IS NOT NULL
+              AND COALESCE(design_version, 1) >= ?
+            """,
+            (min_design_version,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = conn.execute(
+            """
+            SELECT scenario_key, npci_bank, rzp_bank, error_class, amount_paise,
+                   regime, failure_error_code, retry_prior, recovered
+            FROM outcomes
+            WHERE error IS NULL AND assigned_click IS NOT NULL
+            """
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -136,7 +148,7 @@ def kfold_metrics(
     n = len(y)
     idx = rng.permutation(n)
     folds = np.array_split(idx, k)
-    accs, precs, recs, losses = [], [], [], []
+    accs, precs, recs, losses, aucs = [], [], [], [], []
     for f in range(k):
         test_idx = folds[f]
         train_idx = np.concatenate([folds[j] for j in range(k) if j != f])
@@ -154,6 +166,16 @@ def kfold_metrics(
         recs.append(tp / (tp + fn) if tp + fn > 0 else 0.0)
         eps = 1e-9
         losses.append(float(-np.mean(yt * np.log(p + eps) + (1 - yt) * np.log(1 - p + eps))))
+        # rank-based AUC (handles ties via average ranks)
+        order = np.argsort(p)
+        ranks = np.empty_like(order, dtype=float)
+        ranks[order] = np.arange(1, len(p) + 1)
+        n_pos, n_neg = float(yt.sum()), float((yt == 0).sum())
+        aucs.append(
+            float((ranks[yt == 1].sum() - n_pos * (n_pos + 1) / 2) / max(n_pos * n_neg, 1))
+            if n_pos > 0 and n_neg > 0
+            else 0.5
+        )
     if not accs:
         return {
             "cv_accuracy": 0.0,
@@ -182,13 +204,15 @@ def train(db_path: Path | None = None, out_dir: Path | None = None) -> dict[str,
     p = predict_proba(w, X)
     insample_acc = float(((p >= 0.5).astype(float) == y).mean())
     metrics = kfold_metrics(X, y)
+    base_rate = float(y.mean())
     metrics.update(
         {
             "status": "ok",
             "rows": len(rows),
             "recovered": int(y.sum()),
             "in_sample_accuracy": insample_acc,
-            "base_rate": float(y.mean()),
+            "base_rate": base_rate,
+            "lift_over_base": round(metrics["cv_accuracy"] - base_rate, 4),
         }
     )
 

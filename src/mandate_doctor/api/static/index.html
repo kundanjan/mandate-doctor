@@ -469,18 +469,6 @@ function CChart({ config, height }) {
 const GRID = { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { font: {size: 10} } };
 
 function AnalyticsView({ stats }) {
-  const [demoResult, setDemoResult] = React.useState(null);
-
-  const runDupDemo = async () => {
-    setDemoResult({running: true});
-    try {
-      const r = await fetch('/api/demo/duplicate-webhooks', {method: 'POST'});
-      setDemoResult(await r.json());
-    } catch (e) {
-      setDemoResult({error: String(e)});
-    }
-  };
-
   const s = stats || {};
   const t = s.totals || {};
   const n = t.n || 0;
@@ -595,31 +583,8 @@ function AnalyticsView({ stats }) {
           <div class="kpi model"><b>${model.rows || '–'}</b><small>model trained on</small></div>
         ` : null}
         ${s.idempotency ? html`
-          <div class="kpi"><b>${s.idempotency?.claims ?? 0}</b><small>recovery claims</small></div>
-          <div class="kpi ok"><b>${s.idempotency?.executed ?? 0}</b><small>executed once</small></div>
-          <div class="kpi"><b>${s.idempotency?.deduplicated ?? 0}</b><small>duplicates blocked</small></div>
-        ` : null}
       </div>
 
-      <div class="idem-card">
-        <div class="idem-left">
-          <h3>At-most-once guarantee</h3>
-          <p>Fires 10 identical payment.failed webhooks concurrently.</p>
-          <button class="demo-btn" onClick=${runDupDemo}
-            disabled=${demoResult?.running}>
-            ${demoResult?.running ? 'Firing…' : 'Run duplicate-webhook test'}
-          </button>
-        </div>
-        <div class="idem-right">
-          ${demoResult && !demoResult.running && !demoResult.error ? html`
-            <div class="demo-verdict ${demoResult.executed === 1 ? 'pass' : 'fail'}">
-              <b>${demoResult.executed}</b> executed · <b>${demoResult.deduplicated}</b> blocked
-              <span>${demoResult.verdict}</span>
-            </div>
-          ` : html`<div class="demo-verdict idle">awaiting test</div>`}
-          ${demoResult?.error ? html`<div class="demo-verdict fail">${demoResult.error}</div>` : null}
-        </div>
-      </div>
 
       <div class="charts">
         <div class="chart-card">
