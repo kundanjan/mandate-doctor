@@ -582,7 +582,6 @@ function AnalyticsView({ stats }) {
           <div class="kpi model"><b>${Math.round((model.cv_accuracy || 0) * 100)}%</b><small>model CV accuracy</small></div>
           <div class="kpi model"><b>${model.rows || '–'}</b><small>model trained on</small></div>
         ` : null}
-        ${s.idempotency ? html`
       </div>
 
 
