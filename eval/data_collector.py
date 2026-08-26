@@ -229,6 +229,38 @@ async def collect_one(
         created_at=now,
     )
 
+    async def _create_throttled(scn_key: str, phase: str) -> dict[str, Any]:
+        """Create a payment link; on throttle, cool down 150s and retry once."""
+        desc = f"{phase} {scn['error_class'].upper()} {scn['npci_bank']}"
+
+        async def _build() -> dict[str, Any]:
+            return await create_payment_link(
+                amount_paise=scn["amount_paise"],
+                reference_id=scn_key,
+                description=desc,
+                send_sms=False,
+                send_email=False,
+            )
+
+        try:
+            return await _build()
+        except RazorpayError as exc:
+            lowered = exc.description.lower()
+            if "too many request" not in lowered and "try after sometime" not in lowered:
+                raise
+        logger.warning("throttled_cooling_down", scenario=scn_key, wait_s=150)
+        await emit(
+            {
+                "type": "step",
+                "node": "order",
+                "status": "running",
+                "detail": "rate-limited — cooling down 150s",
+            }
+        )
+        await asyncio.sleep(150)
+        result: dict[str, Any] = await _build()
+        return result
+
     try:
 
         async def _on_step(step: str, status: str) -> None:
@@ -240,13 +272,7 @@ async def collect_one(
         # session that FAILS. The failure is a real Razorpay payment
         # with a real error code, captured below.
         await emit({"type": "step", "node": "order", "status": "running"})
-        debit_link = await create_payment_link(
-            amount_paise=scn["amount_paise"],
-            reference_id=f"{scn['scenario_key']}_debit",
-            description=f"Debit attempt {scn['error_class'].upper()} {scn['npci_bank']}",
-            send_sms=False,
-            send_email=False,
-        )
+        debit_link = await _create_throttled(f"{scn['scenario_key']}_debit", "Debit attempt")
         row.order_id = debit_link.get("order_id")
         await emit(
             {
@@ -293,13 +319,7 @@ async def collect_one(
 
         # ---- PHASE B: recovery intervention (payment link) ----
         await emit({"type": "step", "node": "link", "status": "running"})
-        link = await create_payment_link(
-            amount_paise=scn["amount_paise"],
-            reference_id=scn["scenario_key"],
-            description=f"Recovery {scn['error_class'].upper()} {scn['npci_bank']}",
-            send_sms=False,
-            send_email=False,
-        )
+        link = await _create_throttled(scn["scenario_key"], "Recovery")
         row.plink_id = link["id"]
         row.short_url = link["short_url"]
         await emit({"type": "step", "node": "link", "status": "ok", "detail": link["id"]})
@@ -399,7 +419,7 @@ async def _poll_link(link_id: str, auth: tuple[str, str], timeout_s: float = 25.
                     return status
                 if status == "partially paid":
                     return status
-            await asyncio.sleep(3.0)
+            await asyncio.sleep(5.0)
     return None
 
 
@@ -409,6 +429,7 @@ async def run_batch(
     batch_id: str,
     db_path: Path,
     sink: EventSink | None = None,
+    stop_event: asyncio.Event | None = None,
 ) -> dict[str, int]:
     async def emit(event: dict[str, Any]) -> None:
         if sink is not None:
@@ -428,18 +449,21 @@ async def run_batch(
         queue.put_nowait(scn)
 
     counts = {"done": 0, "recovered": 0, "errors": 0}
+    consecutive_throttles = 0
 
     async def worker(ctx_factory: Callable[[], Awaitable[BrowserContext]]) -> None:
         context = await ctx_factory()
-        await asyncio.sleep(random.uniform(1.0, 4.0))  # stagger starts
+        await asyncio.sleep(random.uniform(4.0, 9.0))  # stagger starts
         try:
             while True:
+                if stop_event is not None and stop_event.is_set():
+                    return
                 try:
                     scn = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     return
                 assert scn is not None
-                await asyncio.sleep(random.uniform(2.0, 5.0))  # smooth API pressure
+                await asyncio.sleep(random.uniform(9.0, 16.0))  # smooth API pressure
                 await emit(
                     {
                         "type": "scenario_start",
@@ -457,6 +481,16 @@ async def run_batch(
                     }
                 )
                 row = await collect_one(scn, batch_id, context, auth, sink=sink)
+                if row.error and "too many request" in row.error.lower():
+                    consecutive_throttles += 1
+                else:
+                    consecutive_throttles = 0
+                if consecutive_throttles >= 3:
+                    logger.warning("circuit_breaker_stopping_batch")
+                    if stop_event is not None:
+                        stop_event.set()
+                    await emit({"type": "batch_stopped", "reason": "rate-limited 3x consecutively"})
+                    return
                 conn.execute(
                     """INSERT OR REPLACE INTO outcomes
                        (scenario_key, batch_id, npci_bank, rzp_bank, error_class,
@@ -514,6 +548,7 @@ async def run_batch(
         await browser.close()
 
     conn.close()
+    counts["stopped"] = int(stop_event.is_set()) if stop_event else 0
     await emit({"type": "batch_end", **counts})
     logger.info("batch_complete", **counts)
     return counts

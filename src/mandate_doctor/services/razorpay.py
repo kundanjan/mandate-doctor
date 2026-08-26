@@ -25,7 +25,7 @@ BASE_URL = "https://api.razorpay.com/v1"
 # backoff. Razorpay signals throttling as BAD_REQUEST_ERROR with a
 # "too many requests" description or HTTP 429.
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
-_MAX_ATTEMPTS = 4
+_MAX_ATTEMPTS = 6
 
 
 class RazorpayError(Exception):
@@ -50,6 +50,10 @@ def _auth() -> tuple[str, str]:
             "Refusing to use non-test-mode keys. This system is test-only.",
         )
     return (key_id, key_secret)
+
+
+def _is_throttled(err: RazorpayError) -> bool:
+    return "too many request" in err.description.lower()
 
 
 def _is_retryable(err: RazorpayError) -> bool:

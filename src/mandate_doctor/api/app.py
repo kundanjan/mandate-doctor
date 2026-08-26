@@ -192,6 +192,7 @@ async def health() -> dict[str, Any]:
 
 _batch_task: asyncio.Task[dict[str, int]] | None = None
 _batch_state: dict[str, Any] = {"running": False, "batch_id": None}
+_batch_stop = asyncio.Event()
 
 
 class BatchRequest(BaseModel):
@@ -210,6 +211,7 @@ async def start_batch(req: BatchRequest) -> dict[str, Any]:
     from eval.data_collector import run_batch
 
     batch_id = datetime.now(UTC).strftime("b%Y%m%d%H%M%S")
+    _batch_stop.clear()
     _batch_state.update(running=True, batch_id=batch_id)
     await bus.publish(
         {"type": "batch_start", "batch_id": batch_id, "n": req.n, "workers": req.workers}
@@ -223,6 +225,7 @@ async def start_batch(req: BatchRequest) -> dict[str, Any]:
                 batch_id=batch_id,
                 db_path=settings.project_root / "data" / "training_data.db",
                 sink=bus,
+                stop_event=_batch_stop,
             )
             # incremental retrain on fresh labeled data
             try:
@@ -315,6 +318,15 @@ async def start_trainer() -> None:
 async def stop_trainer() -> None:
     if _trainer_task is not None:
         _trainer_task.cancel()
+
+
+@app.post("/api/batch/stop")
+async def stop_batch() -> dict[str, Any]:
+    if _batch_task is None or _batch_task.done():
+        raise HTTPException(status_code=409, detail="no batch is running")
+    _batch_stop.set()
+    await bus.publish({"type": "batch_stopped", "batch_id": _batch_state.get("batch_id")})
+    return {"status": "stopping", "note": "in-flight scenarios will finish"}
 
 
 @app.get("/api/batch/status")
