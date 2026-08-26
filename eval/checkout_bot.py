@@ -172,7 +172,7 @@ def npcibank_to_rzp_bank(npci_bank: str) -> str:
         "central bank of india": "Central Bank of India",
         "bank of india": "Bank of India",
         "indian bank": "Indian Bank",
-        "airtel payments bank": "Airtel Payments Bank",
+        "airtel payments bank": "Bank of Baroda",
         "ujjivan small finance bank": "Ujjivan",
         "equitas small finance bank": "Equitas",
     }

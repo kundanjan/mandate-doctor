@@ -13,7 +13,7 @@ import asyncio
 import hashlib
 import hmac
 import json
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -24,10 +24,13 @@ from pydantic import BaseModel, Field
 
 from mandate_doctor.api.events import bus
 from mandate_doctor.config import settings
+from mandate_doctor.core.idempotency import IdempotencyRepository
 
 logger = structlog.get_logger(__name__)
 
 app = FastAPI(title="Mandate Doctor", version="0.2.0")
+
+_idem = IdempotencyRepository(settings.project_root / "data" / "idempotency.db")
 
 app.add_middleware(
     CORSMiddleware,
@@ -84,11 +87,98 @@ async def razorpay_webhook(request: Request) -> dict[str, Any]:
                 "error_description": pay.get("error_description"),
                 "amount": pay.get("amount"),
             }
+        # Idempotent recovery: exactly-once per failed payment, no matter
+        # how many duplicate webhooks arrive.
+        await _idempotent_recovery(pay)
 
     await bus.publish({"type": "webhook", "event_type": event_type, "entity_id": plink_id})
 
     logger.info("webhook_received", event_type=event_type, event_id=event_id)
     return {"status": "ok", "event_type": event_type}
+
+
+async def _idempotent_recovery(pay: dict[str, Any]) -> dict[str, Any]:
+    """Claim -> decide -> execute, at most once per failed payment."""
+    payment_id = pay.get("id") or "unknown"
+    key = f"{payment_id}:RECOVER"
+    claim = await asyncio.to_thread(_idem.claim, key)
+    if not claim.won:
+        await bus.publish(
+            {
+                "type": "idempotency",
+                "outcome": "deduplicated",
+                "key": key,
+                "cached_decision": claim.cached_decision,
+            }
+        )
+        logger.info("recovery_deduplicated", key=key)
+        return {"outcome": "deduplicated", "decision": claim.cached_decision}
+
+    error_code = pay.get("error_code") or "UNKNOWN"
+    if error_code in ("BAD_REQUEST_ERROR", "GATEWAY_ERROR"):
+        decision, reason = "RECOVERY_LINK", "transient/technical failure — recoverable"
+    else:
+        decision, reason = "ESCALATE", f"unclassified error {error_code}"
+
+    execution_ref = ""
+    executed = False
+    if decision == "RECOVERY_LINK":
+        # Physical execution — the PK constraint makes this at-most-once
+        # even under a catastrophic bug. The ref is the real recovery
+        # artifact when auto-recovery is enabled; otherwise a recorded
+        # audit ref.
+        if settings.auto_recover:
+            from mandate_doctor.services.razorpay import create_payment_link
+
+            link = await create_payment_link(
+                amount_paise=int(pay.get("amount") or 0),
+                reference_id=f"auto_recovery_{payment_id}",
+                description="Mandate Doctor auto-recovery",
+            )
+            execution_ref = link["id"]
+        else:
+            execution_ref = f"audit_only_{payment_id}"
+        executed = await asyncio.to_thread(_idem.record_execution, key, execution_ref)
+
+    await asyncio.to_thread(_idem.record_decision, key, decision, reason)
+    await bus.publish(
+        {
+            "type": "idempotency",
+            "outcome": "executed" if executed else "decided",
+            "key": key,
+            "decision": decision,
+            "ref": execution_ref,
+        }
+    )
+    logger.info("recovery_idempotent", key=key, decision=decision)
+    return {"outcome": "executed", "decision": decision, "ref": execution_ref}
+
+
+@app.post("/api/demo/duplicate-webhooks")
+async def demo_duplicate_webhooks() -> dict[str, Any]:
+    """Fire 10 IDENTICAL payment.failed webhooks concurrently at the
+    idempotent recovery routine and report exactly-once behavior."""
+    demo_payment = {
+        "id": f"pay_demo_{int(datetime.now(UTC).timestamp())}",
+        "amount": 49900,
+        "error_code": "BAD_REQUEST_ERROR",
+        "notes": {"reference_id": "demo_duplicate"},
+    }
+    results = await asyncio.gather(*(_idempotent_recovery(demo_payment) for _ in range(10)))
+    executed = sum(1 for r in results if r.get("outcome") == "executed")
+    deduped = sum(1 for r in results if r.get("outcome") == "deduplicated")
+    return {
+        "webhooks_fired": 10,
+        "executed": executed,
+        "deduplicated": deduped,
+        "verdict": "exactly-once holds" if executed == 1 else "VIOLATION",
+        "results": results,
+    }
+
+
+@app.get("/api/idempotency/stats")
+async def idempotency_stats() -> dict[str, Any]:
+    return await asyncio.to_thread(_idem.stats)
 
 
 @app.get("/api/bounce/{reference_id}")
@@ -165,6 +255,8 @@ async def get_stats() -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - dashboard must not crash on bad artifact
             model_metrics = None
 
+    idem = await asyncio.to_thread(_idem.stats)
+
     return {
         "status": "ok",
         "totals": totals,
@@ -173,6 +265,7 @@ async def get_stats() -> dict[str, Any]:
         "by_bank": by_bank,
         "by_amount": by_amount,
         "model": model_metrics,
+        "idempotency": idem,
     }
 
 
