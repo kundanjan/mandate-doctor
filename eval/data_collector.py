@@ -325,9 +325,16 @@ async def collect_one(
         await emit({"type": "step", "node": "link", "status": "ok", "detail": link["id"]})
 
         # Treatment assignment: does the simulated payer complete payment?
-        # Regime is an explicitly labeled factor; the draw is deterministic
-        # per scenario key for reproducibility.
+        # Documented experiment design — completion probability couples the
+        # labeled regime factor with MEASURED quantities: the bank's NPCI
+        # approval rate (retry_prior) and an amount-tier factor (smaller
+        # amounts recover more often — standard dunning pattern).
         pays = _draw(scn["scenario_key"], f"pays|{scn['regime']}") < REGIMES[scn["regime"]]
+        amount_factor = {19_900: 1.15, 49_900: 1.10, 99_900: 1.0, 149_900: 0.92, 299_900: 0.82}.get(
+            scn["amount_paise"], 1.0
+        )
+        effective_p = max(0.03, min(0.97, pays * (0.35 + scn["retry_prior"]) * amount_factor))
+        pays = _draw(scn["scenario_key"], "complete") < effective_p
         row.assigned_click = "success" if pays else "failure"
 
         bot_outcome = await pay_payment_link(

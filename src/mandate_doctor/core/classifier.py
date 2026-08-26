@@ -94,7 +94,7 @@ def classify(attempt: DebitAttempt) -> tuple[FailureBucket, float, list[str], st
         f"Unknown error code '{error_code}' and no pattern match in description — "
         f"holding for human review (never guess on money decisions)"
     )
-    logger.warn(
+    logger.warning(
         "classification_ambiguous",
         attempt_id=attempt.attempt_id,
         mandate_id=attempt.mandate_id,

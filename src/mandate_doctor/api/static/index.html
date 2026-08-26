@@ -161,6 +161,29 @@
   .view-btn.active { background: var(--accent); color: #fff; }
   .view-btn:hover:not(.active) { color: #fff; }
 
+  .idem-card {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 20px; background: var(--node); border: 1px solid var(--node-border);
+    border-radius: 12px; padding: 16px 20px;
+  }
+  .idem-left h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+    color: var(--muted); margin-bottom: 4px; font-weight: 700;
+  }
+  .idem-left p { font-size: 11.5px; color: #c8ccd4; margin-bottom: 10px; }
+  .demo-btn {
+    background: var(--accent2); color: #fff; border: none; border-radius: 8px;
+    padding: 8px 16px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .demo-btn:disabled { opacity: .6; cursor: wait; }
+  .demo-verdict { padding: 10px 14px; border-radius: 9px; font-size: 13px; }
+  .demo-verdict b { font-size: 15px; }
+  .demo-verdict span { display: block; font-size: 10.5px; opacity: .75; margin-top: 2px; text-transform: uppercase; letter-spacing: .5px; }
+  .demo-verdict.pass { background: #12331f; color: var(--ok); border: 1px solid #2f6b46; }
+  .demo-verdict.fail { background: #3d1515; color: var(--err); border: 1px solid #7a3535; }
+  .demo-verdict.idle { color: var(--muted); background: #24262c; border: 1px dashed #3a3d46; text-align: center; }
+
   /* ---------- Analytics view ---------- */
   .stats-wrap { flex: 1; overflow-y: auto; padding: 20px 24px; }
   .stats-empty { color: var(--muted); font-size: 14px; padding: 40px; text-align: center; }
@@ -446,14 +469,24 @@ function CChart({ config, height }) {
 const GRID = { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { font: {size: 10} } };
 
 function AnalyticsView({ stats }) {
-  if (!stats || stats.status === 'no_data') {
-    return html`<div class="stats-wrap"><div class="stats-empty">No data yet — run a batch first.</div></div>`;
-  }
-  const t = stats.totals || {};
+  const [demoResult, setDemoResult] = React.useState(null);
+
+  const runDupDemo = async () => {
+    setDemoResult({running: true});
+    try {
+      const r = await fetch('/api/demo/duplicate-webhooks', {method: 'POST'});
+      setDemoResult(await r.json());
+    } catch (e) {
+      setDemoResult({error: String(e)});
+    }
+  };
+
+  const s = stats || {};
+  const t = s.totals || {};
   const n = t.n || 0;
   const rec = t.recovered || 0;
   const rate = n > 0 ? Math.round((rec / n) * 1000) / 10 : 0;
-  const model = stats.model;
+  const model = s.model;
 
   const doughnutCfg = React.useMemo(() => ({
     type: 'doughnut',
@@ -474,10 +507,10 @@ function AnalyticsView({ stats }) {
   const regimeCfg = React.useMemo(() => ({
     type: 'bar',
     data: {
-      labels: (stats.by_regime || []).map(g => g.regime),
+      labels: (s.by_regime || []).map(g => g.regime),
       datasets: [{
         label: 'recovery %',
-        data: (stats.by_regime || []).map(g => g.n ? Math.round(g.recovered / g.n * 100) : 0),
+        data: (s.by_regime || []).map(g => g.n ? Math.round(g.recovered / g.n * 100) : 0),
         backgroundColor: ['#f87171', '#60a5fa', '#4ade80'],
         borderRadius: 8, barPercentage: 0.6,
       }],
@@ -492,11 +525,11 @@ function AnalyticsView({ stats }) {
   const classCfg = React.useMemo(() => ({
     type: 'bar',
     data: {
-      labels: (stats.by_class || []).map(g => g.error_class.toUpperCase()),
+      labels: (s.by_class || []).map(g => g.error_class.toUpperCase()),
       datasets: [{
         label: 'recovery %',
-        data: (stats.by_class || []).map(g => g.n ? Math.round(g.recovered / g.n * 100) : 0),
-        backgroundColor: (stats.by_class || []).map(g => g.error_class === 'td' ? '#2dd4bf' : '#f97316'),
+        data: (s.by_class || []).map(g => g.n ? Math.round(g.recovered / g.n * 100) : 0),
+        backgroundColor: (s.by_class || []).map(g => g.error_class === 'td' ? '#2dd4bf' : '#f97316'),
         borderRadius: 8, barPercentage: 0.5,
       }],
     },
@@ -508,7 +541,7 @@ function AnalyticsView({ stats }) {
   }), [stats]);
 
   const bankCfg = React.useMemo(() => {
-    const banks = (stats.by_bank || []).slice().reverse();
+    const banks = (s.by_bank || []).slice().reverse();
     return {
       type: 'bar',
       data: {
@@ -531,10 +564,10 @@ function AnalyticsView({ stats }) {
   const amountCfg = React.useMemo(() => ({
     type: 'bar',
     data: {
-      labels: (stats.by_amount || []).map(a => '₹' + (a.amount_paise / 100).toLocaleString('en-IN')),
+      labels: (s.by_amount || []).map(a => '₹' + (a.amount_paise / 100).toLocaleString('en-IN')),
       datasets: [{
         label: 'recovery %',
-        data: (stats.by_amount || []).map(a => a.n ? Math.round(a.recovered / a.n * 100) : 0),
+        data: (s.by_amount || []).map(a => a.n ? Math.round(a.recovered / a.n * 100) : 0),
         backgroundColor: '#818cf8', borderRadius: 8, barPercentage: 0.55,
       }],
     },
@@ -545,6 +578,9 @@ function AnalyticsView({ stats }) {
     },
   }), [stats]);
 
+  if (!stats || s.status === 'no_data') {
+    return html`<div class="stats-wrap"><div class="stats-empty">No data yet — run a batch first.</div></div>`;
+  }
   return html`
     <div class="stats-wrap">
       <div class="kpi-grid">
@@ -558,6 +594,31 @@ function AnalyticsView({ stats }) {
           <div class="kpi model"><b>${Math.round((model.cv_accuracy || 0) * 100)}%</b><small>model CV accuracy</small></div>
           <div class="kpi model"><b>${model.rows || '–'}</b><small>model trained on</small></div>
         ` : null}
+        ${s.idempotency ? html`
+          <div class="kpi"><b>${s.idempotency?.claims ?? 0}</b><small>recovery claims</small></div>
+          <div class="kpi ok"><b>${s.idempotency?.executed ?? 0}</b><small>executed once</small></div>
+          <div class="kpi"><b>${s.idempotency?.deduplicated ?? 0}</b><small>duplicates blocked</small></div>
+        ` : null}
+      </div>
+
+      <div class="idem-card">
+        <div class="idem-left">
+          <h3>At-most-once guarantee</h3>
+          <p>Fires 10 identical payment.failed webhooks concurrently.</p>
+          <button class="demo-btn" onClick=${runDupDemo}
+            disabled=${demoResult?.running}>
+            ${demoResult?.running ? 'Firing…' : 'Run duplicate-webhook test'}
+          </button>
+        </div>
+        <div class="idem-right">
+          ${demoResult && !demoResult.running && !demoResult.error ? html`
+            <div class="demo-verdict ${demoResult.executed === 1 ? 'pass' : 'fail'}">
+              <b>${demoResult.executed}</b> executed · <b>${demoResult.deduplicated}</b> blocked
+              <span>${demoResult.verdict}</span>
+            </div>
+          ` : html`<div class="demo-verdict idle">awaiting test</div>`}
+          ${demoResult?.error ? html`<div class="demo-verdict fail">${demoResult.error}</div>` : null}
+        </div>
       </div>
 
       <div class="charts">

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""
     razorpay_webhook_secret: str = ""
+    auto_recover: bool = False  # auto-create recovery links from webhooks
 
     # LLM (optional)
     opencode_zen_api_key: str = ""

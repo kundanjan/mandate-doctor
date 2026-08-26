@@ -117,7 +117,7 @@ class OutcomeTable:
     def _build(self) -> None:
         for scenario in self._scenarios.values():
             for action in ACTIONS:
-                for day in range(0, HORIZON_DAYS + 1):
+                for day in range(HORIZON_DAYS + 1):
                     succeeds = self._draw(scenario, action, day)
                     recovered = scenario.amount_paise if succeeds else 0
                     self._outcomes[(scenario.scenario_id, action, day)] = PotentialOutcome(
