@@ -23,10 +23,11 @@ from typing import Any
 
 import numpy as np
 import structlog
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold, cross_val_score
-from sklearn.pipeline import Pipeline
+from sklearn.ensemble import GradientBoostingClassifier  # type: ignore[import-untyped]
+from sklearn.linear_model import LogisticRegression  # type: ignore[import-untyped]
+from sklearn.model_selection import cross_val_score, StratifiedKFold  # type: ignore[import-untyped]
+from sklearn.pipeline import Pipeline  # type: ignore[import-untyped]
+from sklearn.preprocessing import StandardScaler  # type: ignore[import-untyped]
 from sklearn.preprocessing import StandardScaler
 
 logger = structlog.get_logger(__name__)
