@@ -1,0 +1,167 @@
+{
+  "model_type": "gradient_boosting_sklearn",
+  "trained_at": "2026-09-01T23:50:17.202319",
+  "feature_names": [
+    "bank=Airtel Payments Bank",
+    "bank=Axis Bank",
+    "bank=Bank Of India",
+    "bank=Bank of Baroda",
+    "bank=Canara Bank",
+    "bank=Federal Bank",
+    "bank=Fino Payments Bank",
+    "bank=HDFC Bank",
+    "bank=Haryana Gramin Bank",
+    "bank=ICICI Bank",
+    "bank=India Post Payments Bank",
+    "bank=Indian Overseas Bank",
+    "bank=Jammu and Kashmir Bank",
+    "bank=Kotak Mahindra Bank",
+    "bank=State Bank of India",
+    "err_class=bd",
+    "err_class=td",
+    "regime=base",
+    "regime=optimistic",
+    "regime=pessimistic",
+    "fail_code=BAD_REQUEST_ERROR",
+    "fail_code=NONE",
+    "amount=19900",
+    "amount=49900",
+    "amount=99900",
+    "amount=149900",
+    "amount=299900",
+    "retry_prior",
+    "intercept"
+  ],
+  "weights": [
+    0.014419284440284612,
+    0.01171818007430014,
+    0.0,
+    0.01953234445464641,
+    0.009002008842626802,
+    0.012904254119340099,
+    0.0,
+    0.003642400300343867,
+    0.0,
+    0.0,
+    0.012932571247836982,
+    0.0,
+    0.03129341012524422,
+    0.0,
+    0.016212671865673135,
+    0.0,
+    0.0,
+    0.04587377644619954,
+    0.14203643612286398,
+    0.0880316591817774,
+    0.04388494617613622,
+    0.02949652033088918,
+    0.018507956044764115,
+    0.12518949382830175,
+    0.03302763647076855,
+    0.004575720804846162,
+    0.04566738799989054,
+    0.2920513411232663,
+    0.0
+  ],
+  "encoding": {
+    "banks": [
+      "Airtel Payments Bank",
+      "Axis Bank",
+      "Bank Of India",
+      "Bank of Baroda",
+      "Canara Bank",
+      "Federal Bank",
+      "Fino Payments Bank",
+      "HDFC Bank",
+      "Haryana Gramin Bank",
+      "ICICI Bank",
+      "India Post Payments Bank",
+      "Indian Overseas Bank",
+      "Jammu and Kashmir Bank",
+      "Kotak Mahindra Bank",
+      "State Bank of India"
+    ],
+    "classes": [
+      "bd",
+      "td"
+    ],
+    "regimes": [
+      "base",
+      "optimistic",
+      "pessimistic"
+    ],
+    "err_codes": [
+      "BAD_REQUEST_ERROR",
+      "NONE"
+    ],
+    "amounts": [
+      19900,
+      49900,
+      99900,
+      149900,
+      299900
+    ]
+  },
+  "hyperparams": {
+    "n_estimators": 100,
+    "max_depth": 3,
+    "learning_rate": 0.05,
+    "seed": 42,
+    "cv_folds": 5
+  },
+  "metrics": {
+    "status": "ok",
+    "rows": 122,
+    "recovered": 42,
+    "in_sample_accuracy": 0.9016393442622951,
+    "base_rate": 0.3442622950819672,
+    "cv_accuracy": 0.7956666666666667,
+    "cv_auc": 0.812326388888889,
+    "cv_accuracy_std": 0.041467524106890655,
+    "lift_over_base": 0.4514,
+    "lr_cv_accuracy": 0.7796666666666667
+  },
+  "top_features": [
+    [
+      "retry_prior",
+      0.2920513411232663
+    ],
+    [
+      "regime=optimistic",
+      0.14203643612286398
+    ],
+    [
+      "amount=49900",
+      0.12518949382830175
+    ],
+    [
+      "regime=pessimistic",
+      0.0880316591817774
+    ],
+    [
+      "regime=base",
+      0.04587377644619954
+    ],
+    [
+      "amount=299900",
+      0.04566738799989054
+    ],
+    [
+      "fail_code=BAD_REQUEST_ERROR",
+      0.04388494617613622
+    ],
+    [
+      "amount=99900",
+      0.03302763647076855
+    ],
+    [
+      "bank=Jammu and Kashmir Bank",
+      0.03129341012524422
+    ],
+    [
+      "fail_code=NONE",
+      0.02949652033088918
+    ]
+  ],
+  "data_provenance": "labels = API-verified payment-link outcomes from Razorpay test mode; retry_prior = NPCI Jul-2026 bank approval rates; no invented probabilities"
+}

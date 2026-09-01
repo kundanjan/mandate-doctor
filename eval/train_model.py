@@ -23,6 +23,11 @@ from typing import Any
 
 import numpy as np
 import structlog
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 logger = structlog.get_logger(__name__)
 
@@ -244,6 +249,86 @@ def load_model(path: Path | None = None) -> dict[str, Any]:
     return loaded
 
 
+
+def train_sklearn(db_path: Path | None = None, out_dir: Path | None = None) -> dict[str, Any]:
+    """Train using sklearn GradientBoosting + LogisticRegression ensemble.
+
+    Uses GradientBoosting for prediction and LogReg for interpretability.
+    Reports cross-validated accuracy and AUC.
+    """
+    rows = load_rows(db_path)
+    if len(rows) < 20:
+        logger.warning("insufficient_data", rows=len(rows), minimum=20)
+        return {"status": "insufficient_data", "rows": len(rows)}
+
+    X, y, feature_names, encoding = build_design(rows)
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_SEED)
+
+    # Primary model: GradientBoosting
+    gb = GradientBoostingClassifier(
+        n_estimators=100, max_depth=3, learning_rate=0.05, random_state=RANDOM_SEED
+    )
+    gb_acc = cross_val_score(gb, X, y, cv=cv, scoring="accuracy")
+    gb_auc = cross_val_score(gb, X, y, cv=cv, scoring="roc_auc")
+    gb.fit(X, y)
+
+    # Interpretable model: LogReg
+    lr = Pipeline([("scaler", StandardScaler()), ("clf", LogisticRegression(
+        solver="liblinear", max_iter=1000, C=1.0, random_state=RANDOM_SEED
+    ))])
+    lr_acc = cross_val_score(lr, X, y, cv=cv, scoring="accuracy")
+    lr.fit(X, y)
+
+    base_rate = float(y.mean())
+    insample_acc = float((gb.predict(X) == y).mean())
+
+    metrics = {
+        "status": "ok",
+        "rows": len(rows),
+        "recovered": int(y.sum()),
+        "in_sample_accuracy": insample_acc,
+        "base_rate": base_rate,
+        "cv_accuracy": float(gb_acc.mean()),
+        "cv_auc": float(gb_auc.mean()),
+        "cv_accuracy_std": float(gb_acc.std()),
+        "lift_over_base": round(float(gb_acc.mean()) - base_rate, 4),
+        "lr_cv_accuracy": float(lr_acc.mean()),
+    }
+
+    # Save GB feature importances for interpretability
+    importances = sorted(
+        zip(feature_names, [float(x) for x in gb.feature_importances_]),
+        key=lambda x: x[1], reverse=True
+    )
+
+    artifact = {
+        "model_type": "gradient_boosting_sklearn",
+        "trained_at": __import__("datetime").datetime.now().isoformat(),
+        "feature_names": feature_names,
+        "weights": [float(x) for x in gb.feature_importances_],
+        "encoding": encoding,
+        "hyperparams": {
+            "n_estimators": 100, "max_depth": 3, "learning_rate": 0.05,
+            "seed": RANDOM_SEED, "cv_folds": 5,
+        },
+        "metrics": metrics,
+        "top_features": importances[:10],
+        "data_provenance": (
+            "labels = API-verified payment-link outcomes from Razorpay "
+            "test mode; retry_prior = NPCI Jul-2026 bank approval rates; "
+            "no invented probabilities"
+        ),
+    }
+
+    out = out_dir or MODELS_DIR
+    out.mkdir(exist_ok=True)
+    path = out / "recovery_model.json"
+    path.write_text(json.dumps(artifact, indent=2))
+    logger.info("model_saved_gb", path=str(path), **metrics)
+    return artifact
+
+
 def train_incremental(min_new_rows: int = 5) -> dict[str, Any]:
     """Retrain only if enough NEW labeled rows arrived since the last run.
 
@@ -266,7 +351,7 @@ def train_incremental(min_new_rows: int = 5) -> dict[str, Any]:
             "last_trained_rows": last_rows,
         }
 
-    artifact = train()
+    artifact = train_sklearn()
     if artifact.get("status") != "ok":
         return artifact
 
@@ -319,5 +404,5 @@ def score_row(model: dict[str, Any], row: dict[str, Any]) -> float:
 
 
 if __name__ == "__main__":
-    result = train()
+    result = train_sklearn()
     print(json.dumps({k: v for k, v in result.items() if k != "feature_names"}, indent=2))
