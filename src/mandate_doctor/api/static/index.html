@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mandate Doctor — Live Recovery Pipeline</title>
+<link rel="stylesheet" href="https://unpkg.com/@xyflow/react@12.3.5/dist/style.css">
+<style>
+  :root {
+    --bg: #17181c;
+    --canvas: #1d1f24;
+    --node: #26282f;
+    --node-border: #3a3d46;
+    --node-border-active: #ff6d5a;
+    --text: #e8eaed;
+    --muted: #8b9099;
+    --accent: #ff6d5a;
+    --accent-glow: rgba(255, 109, 90, .18);
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --header: #141519;
+    --panel: #202227;
+    --edge: #464a55;
+    --edge-active: #ff6d5a;
+    --chip: #2e3138;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body, #root { height: 100%; }
+  body {
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text); overflow: hidden;
+  }
+
+  .shell { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ---------- Header ---------- */
+  header {
+    background: var(--header); color: #fff; padding: 9px 18px;
+    display: flex; align-items: center; gap: 18px; flex-shrink: 0;
+    border-bottom: 1px solid #2a2d34; z-index: 20;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; }
+  .brand .logo {
+    background: var(--accent); color: #fff; font-weight: 800; font-size: 12px;
+    border-radius: 7px; padding: 4px 8px; letter-spacing: .5px;
+  }
+  .brand .name { font-size: 14.5px; font-weight: 700; }
+  .brand .track { font-size: 10.5px; color: #7a8089; margin-left: 4px; }
+
+  .controls { display: flex; gap: 8px; align-items: center; }
+  .ctl { display: flex; flex-direction: column; gap: 2px; }
+  .ctl label { font-size: 9px; color: #7a8089; text-transform: uppercase; letter-spacing: .7px; }
+  .controls input {
+    background: #26282f; color: #fff; border: 1px solid #3a3d46;
+    border-radius: 7px; padding: 5px 10px; width: 72px; font-size: 13px; outline: none;
+  }
+  .controls input:focus { border-color: var(--accent); }
+  #startBtn {
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 8px 20px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+    transition: all .15s; letter-spacing: .3px; margin-top: 12px;
+  }
+  #startBtn:hover { filter: brightness(1.12); }
+  .stop-btn {
+    background: #7f1d1d; color: #fff; border: 1px solid #b91c1c;
+    border-radius: 8px; padding: 8px 16px; font-size: 12.5px; font-weight: 700;
+    cursor: pointer; margin-top: 12px; transition: all .15s; letter-spacing: .3px;
+  }
+  .stop-btn:hover { background: #b91c1c; filter: brightness(1.1); }
+  #startBtn:disabled { background: #3a3d46; cursor: not-allowed; }
+
+  .counters { display: flex; gap: 5px; margin-left: auto; }
+  .counter {
+    background: #202227; border: 1px solid #2e3138; border-radius: 9px;
+    padding: 4px 13px; text-align: center; min-width: 68px;
+  }
+  .counter b { font-size: 17px; font-weight: 700; display: block; font-variant-numeric: tabular-nums; }
+  .counter small { color: #7a8089; font-size: 8.5px; text-transform: uppercase; letter-spacing: .7px; }
+  .counter.ok b { color: var(--ok); }
+  .counter.lost b { color: #6b7280; }
+  .counter.err b { color: var(--err); }
+  .connwrap { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 0 2px; }
+  #conn { width: 9px; height: 9px; border-radius: 50%; background: var(--err); transition: all .3s; }
+  #conn.live { background: var(--ok); box-shadow: 0 0 7px var(--ok); }
+  .connwrap small { color: #7a8089; font-size: 8px; text-transform: uppercase; letter-spacing: .6px; }
+
+  /* ---------- Body ---------- */
+  .body-row { display: flex; flex: 1; min-height: 0; }
+  .flow-wrap { flex: 1; min-width: 0; position: relative; }
+  .flow-wrap .react-flow { background: var(--canvas); }
+
+  /* ---------- n8n-style dark node ---------- */
+  .rn {
+    background: var(--node); border-radius: 10px; width: 208px; padding: 10px 12px 9px;
+    border: 2px solid var(--node-border);
+    box-shadow: 0 2px 8px rgba(0,0,0,.35);
+    display: flex; gap: 10px; align-items: flex-start;
+    transition: border-color .25s, box-shadow .25s; cursor: grab;
+  }
+  .rn:hover { border-color: #4d515c; }
+  .rn-icon {
+    width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center;
+    flex-shrink: 0; background: #31343d; border: 1.5px solid #3d414b;
+  }
+  .rn-icon svg { width: 19px; height: 19px; fill: none; stroke-width: 2; }
+  .rn-body { flex: 1; min-width: 0; }
+  .rn-step {
+    font-size: 10px; font-weight: 800; letter-spacing: 1px;
+    text-transform: uppercase; margin-bottom: 1px;
+  }
+  .rn-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .rn-sub { font-size: 10.5px; color: var(--muted); margin-top: 2px; font-family: ui-monospace, monospace; }
+  .rn-meta { display: flex; align-items: center; gap: 6px; margin-top: 5px; height: 14px; }
+  .rn-count { font-size: 11.5px; font-weight: 700; color: #7ab8ff; font-variant-numeric: tabular-nums; }
+  .rn-badge {
+    width: 16px; height: 16px; border-radius: 50%; margin-left: auto;
+    display: grid; place-items: center; transition: all .2s;
+  }
+  .rn-badge svg { width: 9px; height: 9px; }
+  .rn-badge.idle { border: 1.5px solid #4a4f59; background: transparent; }
+  .rn-badge.ok { background: #16a34a; }
+  .rn-badge.err { background: #dc2626; }
+  .rn-badge.running { background: var(--accent); animation: pulse .9s infinite; }
+
+  .rn.running { border-color: var(--accent); box-shadow: 0 0 0 5px var(--accent-glow), 0 2px 12px rgba(0,0,0,.4); }
+
+  .rn.ok { border-color: #2f6b46; }
+
+  .rn.error { border-color: #7a3535; }
+
+  @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.75); } }
+
+  /* Edges */
+  .react-flow__edge-path { stroke: #707686; stroke-width: 3; }
+  .react-flow__edge.animated .react-flow__edge-path {
+    stroke: var(--edge-active); stroke-dasharray: 8 6;
+    animation: dashflow .45s linear infinite;
+  }
+  @keyframes dashflow { to { stroke-dashoffset: -14; } }
+  .react-flow__handle { background: var(--accent) !important; border: none !important; width: 7px !important; height: 7px !important; }
+  .react-flow__edge.selected .react-flow__edge-path { stroke: var(--accent); }
+  .react-flow__controls { box-shadow: none; background: var(--panel); border: 1px solid var(--node-border); border-radius: 8px; overflow: hidden; }
+  .react-flow__controls-button {
+    background: var(--panel); border-bottom: 1px solid var(--node-border); color: #aeb4bf;
+    fill: #aeb4bf;
+  }
+  .react-flow__controls-button:hover { background: #2a2d34; }
+  .react-flow__minimap { background: var(--panel) !important; border: 1px solid var(--node-border); border-radius: 8px; }
+
+  /* ---------- View toggle ---------- */
+  .view-toggle {
+    display: flex; gap: 2px; background: #26282f; border: 1px solid #3a3d46;
+    border-radius: 8px; padding: 3px;
+  }
+  .view-btn {
+    background: none; border: none; color: #9aa3af; font-size: 12px;
+    font-weight: 700; padding: 6px 16px; border-radius: 6px; cursor: pointer;
+    transition: all .15s;
+  }
+  .view-btn.active { background: var(--accent); color: #fff; }
+  .view-btn:hover:not(.active) { color: #fff; }
+
+  .idem-card {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 20px; background: var(--node); border: 1px solid var(--node-border);
+    border-radius: 12px; padding: 16px 20px;
+  }
+  .idem-left h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+    color: var(--muted); margin-bottom: 4px; font-weight: 700;
+  }
+  .idem-left p { font-size: 11.5px; color: #c8ccd4; margin-bottom: 10px; }
+  .demo-btn {
+    background: var(--accent2); color: #fff; border: none; border-radius: 8px;
+    padding: 8px 16px; font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .demo-btn:disabled { opacity: .6; cursor: wait; }
+  .demo-verdict { padding: 10px 14px; border-radius: 9px; font-size: 13px; }
+  .demo-verdict b { font-size: 15px; }
+  .demo-verdict span { display: block; font-size: 10.5px; opacity: .75; margin-top: 2px; text-transform: uppercase; letter-spacing: .5px; }
+  .demo-verdict.pass { background: #12331f; color: var(--ok); border: 1px solid #2f6b46; }
+  .demo-verdict.fail { background: #3d1515; color: var(--err); border: 1px solid #7a3535; }
+  .demo-verdict.idle { color: var(--muted); background: #24262c; border: 1px dashed #3a3d46; text-align: center; }
+
+  /* ---------- Analytics view ---------- */
+  .stats-wrap { flex: 1; overflow-y: auto; padding: 20px 24px; }
+  .stats-empty { color: var(--muted); font-size: 14px; padding: 40px; text-align: center; }
+  .kpi-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px; margin-bottom: 20px;
+  }
+  .kpi {
+    background: var(--node); border: 1px solid var(--node-border);
+    border-radius: 12px; padding: 14px 16px; text-align: center;
+  }
+  .kpi b { font-size: 24px; font-weight: 800; display: block; font-variant-numeric: tabular-nums; }
+  .kpi small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .7px; }
+  .kpi.ok b { color: var(--ok); }
+  .kpi.err b { color: var(--err); }
+  .kpi.model { border-color: #5b4a8a; }
+  .kpi.model b { color: #c084fc; }
+  .charts {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 14px;
+  }
+  .chart-card {
+    background: var(--node); border: 1px solid var(--node-border);
+    border-radius: 12px; padding: 16px 18px;
+  }
+  .chart-card h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+    color: var(--muted); margin-bottom: 14px; font-weight: 700;
+  }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+  .bar-label {
+    width: 150px; font-size: 11.5px; color: #c8ccd4; text-align: right;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0;
+  }
+  .bar-track {
+    flex: 1; height: 14px; background: #2e3138; border-radius: 7px; overflow: hidden;
+  }
+  .bar-fill { height: 100%; border-radius: 7px; transition: width .5s ease; }
+  .bar-val { width: 110px; font-size: 10.5px; color: var(--muted); font-family: ui-monospace, monospace; }
+
+  /* ---------- Resize controls ---------- */
+  .react-flow__resize-control.line { border-color: var(--accent); }
+  .react-flow__resize-control.handle {
+    background: var(--accent); border: none; width: 8px; height: 8px;
+    border-radius: 2px;
+  }
+
+  /* ---------- Executions panel ---------- */
+  aside {
+    width: 335px; background: var(--panel); border-left: 1px solid #2a2d34;
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  aside .aside-head {
+    padding: 10px 12px 0; border-bottom: 1px solid #2a2d34;
+  }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .9px; color: var(--muted); font-weight: 700; }
+  .tabs { display: flex; gap: 2px; }
+  .tab {
+    background: none; border: none; color: var(--muted); font-size: 11px;
+    font-weight: 700; text-transform: uppercase; letter-spacing: .8px;
+    padding: 8px 12px 10px; cursor: pointer; border-bottom: 2px solid transparent;
+    transition: color .15s, border-color .15s;
+  }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab:hover { color: var(--text); }
+  .tab .badge {
+    background: var(--chip); border-radius: 4px; padding: 1px 5px;
+    font-size: 9px; margin-left: 4px; color: #aeb4bf;
+  }
+  .pane { display: none; flex: 1; overflow-y: auto; padding: 9px 11px; }
+  .pane.active { display: block; }
+  .pane::-webkit-scrollbar { width: 8px; }
+  .pane::-webkit-scrollbar-thumb { background: #31343d; border-radius: 4px; }
+
+  /* Log feed */
+  #logs { font-family: ui-monospace, 'SF Mono', monospace; font-size: 10px; line-height: 1.75; }
+  .logline { display: flex; gap: 7px; padding: 1px 0; border-bottom: 1px solid #23252b; }
+  .logline .lt { color: #5b606b; flex-shrink: 0; }
+  .logline .lm { color: #aeb4bf; word-break: break-word; }
+  .logline.ok .lm { color: var(--ok); }
+  .logline.err .lm { color: var(--err); }
+  .logline.accent .lm { color: #ff9a8a; }
+  .logline.dim .lm { color: #6b7280; }
+  .exec {
+    border: 1px solid #31343d; border-radius: 9px; padding: 8px 10px;
+    margin-bottom: 7px; font-size: 11.5px; background: #24262c;
+    animation: slidein .25s ease; transition: border-color .2s;
+  }
+  @keyframes slidein { from { opacity: 0; transform: translateY(-6px); } }
+  .exec.running { border-color: #6b4444; background: #2a2426; }
+  .exec .top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .exec .key { font-weight: 700; font-family: ui-monospace, monospace; font-size: 10px; color: #c8ccd4; }
+  .exec .bank { color: var(--muted); font-size: 9.5px; text-align: right; }
+  .exec .stages { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+  .stage {
+    padding: 2px 7px; border-radius: 4px; background: var(--chip); font-size: 9px;
+    color: #8b9099; font-weight: 600; border: 1px solid #363a43;
+  }
+  .stage.run { background: #3d2a2a; color: #ff9a8a; border-color: #6b4444; }
+  .stage.ok { background: #1f3328; color: var(--ok); border-color: #2f6b46; }
+  .stage.err { background: #3d2222; color: var(--err); border-color: #7a3535; }
+  .exec .result { margin-top: 6px; font-weight: 700; font-size: 11px; }
+  .exec .result.paid { color: var(--ok); }
+  .exec .result.lost { color: #6b7280; }
+  .exec .result.unknown { color: var(--warn); }
+
+  /* ---------- Ticker + toast ---------- */
+  #ticker {
+    background: #101116; color: #86efac; font-family: ui-monospace, monospace;
+    font-size: 11px; padding: 5px 16px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; flex-shrink: 0;
+    border-top: 1px solid #2a2d34;
+  }
+  #ticker b { color: #fff; font-weight: 600; }
+  .toast {
+    position: fixed; bottom: 44px; left: 16px; background: #2a2d34; color: #fff;
+    padding: 10px 17px; border-radius: 9px; font-size: 12.5px; z-index: 100;
+    box-shadow: 0 6px 20px rgba(0,0,0,.5); opacity: 0; transform: translateY(8px);
+    transition: all .3s; pointer-events: none; border-left: 3px solid var(--accent);
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* Legend */
+  .legend {
+    position: absolute; bottom: 12px; left: 12px; z-index: 10;
+    background: rgba(32,34,39,.92); border: 1px solid var(--node-border);
+    border-radius: 8px; padding: 8px 12px; font-size: 10px; color: var(--muted);
+    display: flex; gap: 14px; backdrop-filter: blur(4px);
+  }
+  .legend .li { display: flex; align-items: center; gap: 5px; }
+  .legend .sq { width: 9px; height: 9px; border-radius: 50%; }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "@xyflow/react": "https://esm.sh/@xyflow/react@12.3.5?external=react",
+    "chart.js/auto": "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/auto/+esm"
+  }
+}
+</script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import {
+  ReactFlow, Background, BackgroundVariant, Controls, MiniMap,
+  Handle, Position, MarkerType, applyNodeChanges, NodeResizer,
+} from '@xyflow/react';
+import htm from 'https://esm.sh/htm@3.1.1';
+import Chart from 'chart.js/auto';
+
+const html = htm.bind(React.createElement);
+
+/* ---------- inline SVG icons (no emoji) ---------- */
+const ICONS = {
+  npci: 'M4 19V5M4 19h16M8 16v-5M12 16V8M16 16v-8M20 16V11',
+  designer: 'M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1M13 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z',
+  order: 'M7 3h10a1 1 0 0 1 1 1v16l-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1ZM9 7h6M9 11h6M9 15h4',
+  link: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1',
+  bot: 'M9 3h6M12 3v4M5 7h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1ZM9 12v1M15 12v1M9 16h6',
+  mock: 'M3 10 12 4l9 6M5 10v9h14v-9M9 19v-5h6v5',
+  poll: 'M4 12h4l3-8 4 16 3-8h2',
+  store: 'M4 6c0-1 1-2 2-2h12c1 0 2 1 2 2v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6ZM8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M4 10h16',
+  webhook: 'M18 8a3 3 0 1 0-2.8-4M18 8a3 3 0 0 1 0 6M6 9a3 3 0 1 1 0-4M6 9a3 3 0 0 0 2.8 4M12 12l-5 4a2.4 2.4 0 1 0 .6 3M12 12l5 4a2.4 2.4 0 1 1-.6 3M12 12V7',
+  bus: 'M13 2 4 14h6l-1 8 9-12h-6l1-8Z',
+  stats: 'M4 19V5M4 19h16M8 15v-4M12 15V8M16 15v-6',
+};
+function Icon({ d, color }) {
+  return html`<svg viewBox="0 0 24 24" style=${{stroke: color || '#aeb4bf'}}><path d=${d} strokeLinecap="round" strokeLinejoin="round"/></svg>`;
+}
+
+/* ================= Graph ================= */
+const NODE_DEFS = [
+  { id: 'npci',     x: 0,   y: 0,   color: '#3b82f6', step: '01', icon: 'npci',    title: 'NPCI Calibration', sub: '50 banks · real Jul-2026 data' },
+  { id: 'designer', x: 380, y: 0,   color: '#a78bfa', step: '02', icon: 'designer', title: 'Scenario Designer', sub: 'bank · class · amount · regime' },
+  { id: 'order',    x: 760, y: 0,   color: '#f97316', step: '03', icon: 'order',   title: 'Debit Attempt',     sub: 'Phase A · forced real failure' },
+  { id: 'link',    x: 1140, y: 0,   color: '#10b981', step: '04', icon: 'link',    title: 'Recovery Link',     sub: 'Phase B · zero retry budget' },
+  { id: 'bot',    x: 1140, y: 300, color: '#22d3ee', step: '05', icon: 'bot',     title: 'Checkout Bot',      sub: 'Playwright · hosted checkout' },
+  { id: 'mock',    x: 760, y: 300, color: '#f59e0b', step: '06', icon: 'mock',    title: 'Mock Bank Gateway', sub: 'success / failure gate' },
+  { id: 'poll',    x: 380, y: 300, color: '#2dd4bf', step: '07', icon: 'poll',    title: 'Outcome Poller',    sub: 'GET /payment_links/:id' },
+  { id: 'store',    x: 0, y: 300, color: '#818cf8', step: '08', icon: 'store',   title: 'SQLite Store',      sub: 'data/training_data.db' },
+  { id: 'webhook',  x: 0, y: 600, color: '#fb7185', step: 'W1', icon: 'webhook', title: 'Webhook Receiver',  sub: 'HMAC-SHA256 · fail-closed' },
+  { id: 'bus',    x: 380, y: 600, color: '#facc15', step: 'W2', icon: 'bus',     title: 'Event Bus',         sub: 'WebSocket /ws fan-out' },
+  { id: 'stats',   x: 760, y: 600, color: '#c084fc', step: 'W3', icon: 'stats',   title: 'Batch Stats',       sub: 'recovered / lost / errors' },
+];
+const EDGE_LABELS = {
+  'npci-designer': 'calibrates',
+  'designer-order': 'designs',
+  'order-link': 'after bounce',
+  'link-bot': 'opens',
+  'bot-mock': 'drives',
+  'mock-poll': 'yields',
+  'poll-store': 'writes',
+  'store-stats': 'aggregates',
+  'webhook-bus': 'verified',
+  'bus-stats': 'streams',
+};
+const EDGE_DEFS = [
+  ['npci','designer', 'sr', 'tl'],
+  ['designer','order', 'sr', 'tl'],
+  ['order','link', 'sr', 'tl'],
+  ['link','bot', 'sb', 'tt'],
+  ['bot','mock', 'sl', 'tr'],
+  ['mock','poll', 'sl', 'tr'],
+  ['poll','store', 'sl', 'tr'],
+  ['store','stats', 'sb', 'tt'],
+  ['webhook','bus', 'sr', 'tl'],
+  ['bus','stats', 'sr', 'tl'],
+];
+const CHAIN = ['npci','designer','order','link','bot','mock','poll','store','stats'];
+const STAGE_TO_NODE = {
+  goto: 'bot', proceed: 'bot', contact_submit: 'bot', bank_select: 'bot',
+  bank_choice: 'mock',
+};
+
+/* ================= Custom node ================= */
+function StatusBadge({ status }) {
+  if (status === 'ok') {
+    return html`<span class="rn-badge ok"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
+  }
+  if (status === 'error') {
+    return html`<span class="rn-badge err"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/></svg></span>`;
+  }
+  if (status === 'running') {
+    return html`<span class="rn-badge running"></span>`;
+  }
+  return html`<span class="rn-badge idle"></span>`;
+}
+
+function N8nNode({ data, selected }) {
+  const st = data.state;
+  const tint = { background: data.color + '22', borderColor: data.color + '55' };
+  return html`
+    <div class=${`rn ${st.status}`}>
+      <${NodeResizer} isVisible=${selected} minWidth=${170} minHeight=${70}
+        lineStyle=${{borderColor: 'var(--accent)'}}
+        handleStyle=${{background: 'var(--accent)', width: 8, height: 8, borderRadius: 2}} />
+      <${Handle} id="tl" type="target" position=${Position.Left} />
+      <${Handle} id="tr" type="target" position=${Position.Right} />
+      <${Handle} id="tt" type="target" position=${Position.Top} />
+      <div class="rn-icon" style=${tint}><${Icon} d=${ICONS[data.icon]} color=${data.color} /></div>
+      <div class="rn-body">
+        <div class="rn-step" style=${{ color: data.color }}>${data.step}</div>
+        <div class="rn-title">${data.title}</div>
+        <div class="rn-sub">${data.sub}</div>
+        <div class="rn-meta">
+          <span class="rn-count">${st.count ? `×${st.count}` : ''}</span>
+          <${StatusBadge} status=${st.status} />
+        </div>
+      </div>
+      <${Handle} id="sr" type="source" position=${Position.Right} />
+      <${Handle} id="sl" type="source" position=${Position.Left} />
+      <${Handle} id="sb" type="source" position=${Position.Bottom} />
+    </div>
+  `;
+}
+const nodeTypes = { n8n: N8nNode };
+
+/* ================= Analytics view ================= */
+Chart.defaults.color = '#9aa3af';
+Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
+Chart.defaults.font.family = "'Inter', 'Segoe UI', system-ui, sans-serif";
+
+function CChart({ config, height }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!ref.current) return undefined;
+    const chart = new Chart(ref.current, config);
+    return () => chart.destroy();
+  }, [config]);
+  return html`<div style=${{position: 'relative', height: height || 230}}>
+    <canvas ref=${ref} />
+  </div>`;
+}
+
+const GRID = { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { font: {size: 10} } };
+
+function AnalyticsView({ stats }) {
+  const s = stats || {};
+  const t = s.totals || {};
+  const n = t.n || 0;
+  const rec = t.recovered || 0;
+  const rate = n > 0 ? Math.round((rec / n) * 1000) / 10 : 0;
+  const model = s.model;
+
+  const doughnutCfg = React.useMemo(() => ({
+    type: 'doughnut',
+    data: {
+      labels: ['Recovered', 'Lost / errored'],
+      datasets: [{
+        data: [rec, Math.max(0, n - rec)],
+        backgroundColor: ['#22c55e', '#3a3d46'],
+        borderColor: '#1d1f24', borderWidth: 3, hoverOffset: 6,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '68%',
+      plugins: { legend: { position: 'bottom', labels: {boxWidth: 10, padding: 14} } },
+    },
+  }), [rec, n]);
+
+  const regimeCfg = React.useMemo(() => ({
+    type: 'bar',
+    data: {
+      labels: (s.by_regime || []).map(g => g.regime),
+      datasets: [{
+        label: 'recovery %',
+        data: (s.by_regime || []).map(g => g.n ? Math.round(g.recovered / g.n * 100) : 0),
+        backgroundColor: ['#f87171', '#60a5fa', '#4ade80'],
+        borderRadius: 8, barPercentage: 0.6,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, max: 100, ...GRID, ticks: {callback: v => v + '%', font: {size: 10}} }, x: GRID },
+    },
+  }), [stats]);
+
+  const classCfg = React.useMemo(() => ({
+    type: 'bar',
+    data: {
+      labels: (s.by_class || []).map(g => g.error_class.toUpperCase()),
+      datasets: [{
+        label: 'recovery %',
+        data: (s.by_class || []).map(g => g.n ? Math.round(g.recovered / g.n * 100) : 0),
+        backgroundColor: (s.by_class || []).map(g => g.error_class === 'td' ? '#2dd4bf' : '#f97316'),
+        borderRadius: 8, barPercentage: 0.5,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, max: 100, ...GRID, ticks: {callback: v => v + '%', font: {size: 10}} }, y: GRID },
+    },
+  }), [stats]);
+
+  const bankCfg = React.useMemo(() => {
+    const banks = (s.by_bank || []).slice().reverse();
+    return {
+      type: 'bar',
+      data: {
+        labels: banks.map(b => b.npci_bank),
+        datasets: [
+          { label: 'recovered', data: banks.map(b => b.recovered),
+            backgroundColor: '#22c55e', borderRadius: 5, barPercentage: 0.7 },
+          { label: 'lost', data: banks.map(b => b.n - b.recovered),
+            backgroundColor: '#3a3d46', borderRadius: 5, barPercentage: 0.7 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: { legend: { position: 'bottom', labels: {boxWidth: 10, padding: 12} } },
+        scales: { x: { stacked: true, ...GRID }, y: { stacked: true, grid: {display: false}, ticks: {font: {size: 10}} } },
+      },
+    };
+  }, [stats]);
+
+  const amountCfg = React.useMemo(() => ({
+    type: 'bar',
+    data: {
+      labels: (s.by_amount || []).map(a => '₹' + (a.amount_paise / 100).toLocaleString('en-IN')),
+      datasets: [{
+        label: 'recovery %',
+        data: (s.by_amount || []).map(a => a.n ? Math.round(a.recovered / a.n * 100) : 0),
+        backgroundColor: '#818cf8', borderRadius: 8, barPercentage: 0.55,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, max: 100, ...GRID, ticks: {callback: v => v + '%', font: {size: 10}} }, x: GRID },
+    },
+  }), [stats]);
+
+  if (!stats || s.status === 'no_data') {
+    return html`<div class="stats-wrap"><div class="stats-empty">No data yet — run a batch first.</div></div>`;
+  }
+  return html`
+    <div class="stats-wrap">
+      <div class="kpi-grid">
+        <div class="kpi"><b>${n}</b><small>total scenarios</small></div>
+        <div class="kpi ok"><b>${rec}</b><small>recovered</small></div>
+        <div class="kpi ok"><b>${rate}%</b><small>recovery rate</small></div>
+        <div class="kpi"><b>${t.clean || 0}</b><small>clean rows</small></div>
+        <div class="kpi"><b>${t.with_evidence || 0}</b><small>real bounces captured</small></div>
+        <div class="kpi err"><b>${t.errored || 0}</b><small>errored</small></div>
+        ${model ? html`
+          <div class="kpi model"><b>${Math.round((model.cv_accuracy || 0) * 100)}%</b><small>model CV accuracy</small></div>
+          <div class="kpi model"><b>${model.rows || '–'}</b><small>model trained on</small></div>
+        ` : null}
+      </div>
+
+
+      <div class="charts">
+        <div class="chart-card">
+          <h3>Overall outcomes</h3>
+          <${CChart} config=${doughnutCfg} height=${240} />
+        </div>
+        <div class="chart-card">
+          <h3>Recovery rate by behavioral regime</h3>
+          <${CChart} config=${regimeCfg} />
+        </div>
+        <div class="chart-card">
+          <h3>Recovery rate by error class</h3>
+          <${CChart} config=${classCfg} height=${180} />
+        </div>
+        <div class="chart-card">
+          <h3>Volume by bank — recovered vs lost</h3>
+          <${CChart} config=${bankCfg} height=${300} />
+        </div>
+        <div class="chart-card">
+          <h3>Recovery rate by amount</h3>
+          <${CChart} config=${amountCfg} />
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ================= App ================= */
+function App() {
+  const [activeEdges, setActiveEdges] = React.useState([]);
+  const [execs, setExecs] = React.useState([]);
+  const [counts, setCounts] = React.useState({done:0, recovered:0, errors:0});
+  const [total, setTotal] = React.useState(null);
+  const [running, setRunning] = React.useState(false);
+  const [live, setLive] = React.useState(false);
+  const [ticker, setTicker] = React.useState('webhook feed idle…');
+  const [toastMsg, setToastMsg] = React.useState('');
+  const [tab, setTab] = React.useState('logs');
+  const [nodes, setNodes] = React.useState(() =>
+    NODE_DEFS.map(d => ({
+      id: d.id, type: 'n8n', position: {x: d.x, y: d.y},
+      data: {...d, state: {status: 'idle', count: 0}}, zIndex: 10,
+    }))
+  );
+  const onNodesChange = React.useCallback(
+    (changes) => setNodes(nds => applyNodeChanges(changes, nds)), []
+  );
+  const [logs, setLogs] = React.useState([]);
+  const [view, setView] = React.useState('flow');
+  const [stats, setStats] = React.useState(null);
+  const [nVal, setNVal] = React.useState(30);
+  const [wVal, setWVal] = React.useState(2);
+  const timers = React.useRef({});
+
+  const addLog = React.useCallback((cls, text) => {
+    const t = new Date().toLocaleTimeString();
+    setLogs(prev => [{t, cls, text}, ...prev].slice(0, 400));
+  }, []);
+
+  const flashEdge = React.useCallback((a, b) => {
+    const id = `${a}-${b}`;
+    setActiveEdges(prev => prev.includes(id) ? prev : [...prev, id]);
+    clearTimeout(timers.current[id]);
+    timers.current[id] = setTimeout(() => {
+      setActiveEdges(prev => prev.filter(x => x !== id));
+    }, 1200);
+  }, []);
+
+  const setNode = React.useCallback((id, status) => {
+    setNodes(nds => nds.map(n =>
+      n.id === id
+        ? {...n, data: {...n.data, state: {...n.data.state, status}}}
+        : n
+    ));
+  }, []);
+
+  const bumpNode = React.useCallback((id) => {
+    setNodes(nds => nds.map(n =>
+      n.id === id
+        ? {...n, data: {...n.data, state: {
+            ...n.data.state, count: (n.data.state?.count || 0) + 1}}}
+        : n
+    ));
+  }, []);
+
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(''), 3800);
+  };
+
+  const ensureExec = (key, meta) => {
+    setExecs(prev => {
+      if (prev.some(e => e.key === key)) return prev;
+      const amount = meta ? `₹${(meta.amount_paise/100).toFixed(0)}` : '';
+      const bank = meta ? `${meta.npci_bank} · ${amount} · ${meta.error_class.toUpperCase()} · ${meta.regime}` : '';
+      return [{key, bank, stages: {}, result: {cls: 'unknown', text: 'running…'}}, ...prev].slice(0, 60);
+    });
+  };
+
+  const setStage = (key, name, status) => {
+    setExecs(prev => prev.map(e =>
+      e.key === key ? {...e, stages: {...e.stages, [name]: status}} : e));
+  };
+  const setResult = (key, cls, text) => {
+    setExecs(prev => prev.map(e =>
+      e.key === key ? {...e, result: {cls, text}} : e));
+  };
+
+  const handle = React.useCallback((ev) => {
+    switch (ev.type) {
+      case 'connected': setLive(true); addLog('dim', 'websocket connected'); break;
+
+      case 'batch_start': {
+        setRunning(true);
+        setTotal(ev.n);
+        setCounts({done:0, recovered:0, errors:0});
+        setNode('npci', 'ok');
+        addLog('accent', `batch ${ev.batch_id} started · n=${ev.n} · workers=${ev.workers}`);
+        showToast(`Batch ${ev.batch_id} — ${ev.n} scenarios · ${ev.workers} workers`);
+        break;
+      }
+      case 'calibration': {
+        setNode('npci', 'ok');
+        flashEdge('npci', 'designer');
+        addLog('dim', `calibration loaded · ${ev.banks} banks · top: ${ev.top_bank}`);
+        break;
+      }
+      case 'scenario_start': {
+        ensureExec(ev.scenario_key, ev);
+        setNode('designer', 'running'); bumpNode('designer');
+        flashEdge('npci', 'designer');
+        addLog('accent', `${ev.scenario_key} · ${ev.npci_bank} → ${ev.rzp_bank} · ₹${(ev.amount_paise/100).toFixed(0)} · ${ev.error_class.toUpperCase()} · ${ev.regime}`);
+        break;
+      }
+      case 'step': {
+        const nodeId = STAGE_TO_NODE[ev.node] || ev.node;
+        const isRun = ev.status === 'running';
+        const cls = ev.status === 'timeout' ? 'error' : 'ok';
+        setNode(nodeId, isRun ? 'running' : cls);
+        if (!isRun) bumpNode(nodeId);
+        const i = CHAIN.indexOf(nodeId);
+        if (i > 0) flashEdge(CHAIN[i-1], nodeId);
+        if (ev.node === 'order')
+          setStage(ev.scenario, 'order', isRun ? 'run' : ev.status === 'error' ? 'err' : 'ok');
+        if (ev.node === 'bank_choice')
+          setStage(ev.scenario, 'bank', ev.status === 'success' ? 'ok' : 'err');
+        if (ev.node === 'poll' && !isRun)
+          setStage(ev.scenario, 'poll', ev.status === 'error' ? 'err' : 'ok');
+
+        const stepKey = ev.node.replace(/^bot_/, '');
+        const stepLog = {
+          order: isRun ? 'creating order…' : ev.status === 'error' ? `order FAILED · ${ev.detail}` : `order ${ev.detail}`,
+          link: isRun ? 'creating payment link…' : `payment link ${ev.detail}`,
+          goto: isRun ? 'opening hosted checkout…' : 'checkout page loaded',
+          proceed: isRun ? 'tapping proceed…' : 'proceed to pay tapped',
+          contact_submit: isRun ? 'submitting contact…' : 'contact submitted',
+          bank_select: isRun ? 'selecting bank…' : 'bank selected',
+          bank_choice: ev.status === 'success' ? 'mock bank: SUCCESS clicked' : ev.status === 'failure' ? 'mock bank: FAILURE clicked' : `mock bank: ${ev.status}`,
+          checkout_frame: isRun ? 'loading checkout frame…' : `checkout frame ${ev.status}`,
+          contact_visible: 'contact form visible',
+          poll: isRun ? 'polling outcome…' : `outcome: ${ev.detail}`,
+        }[stepKey];
+        if (stepLog) {
+          const logCls = ev.status === 'timeout' || ev.status === 'error' ? 'err'
+            : ev.status === 'running' ? 'dim'
+            : ev.node === 'bank_choice' ? (ev.status === 'success' ? 'ok' : 'err')
+            : 'info';
+          addLog(logCls, `${ev.scenario} · ${stepLog}`);
+        }
+        break;
+      }
+      case 'scenario_end': {
+        if (ev.recovered_this) {
+          bumpNode('store'); setNode('store', 'ok');
+          bumpNode('stats'); setNode('stats', 'ok');
+          flashEdge('poll', 'store'); flashEdge('store', 'stats');
+          setResult(ev.scenario, 'paid', `RECOVERED · ${ev.status || 'paid'}`);
+          addLog('ok', `${ev.scenario} · RECOVERED · ${ev.status || 'paid'}`);
+        } else {
+          setResult(ev.scenario, 'lost',
+            ev.error ? `ERROR · ${ev.error}` : `lost · ${ev.status || 'no-pay'}`);
+          addLog('err', `${ev.scenario} · ${ev.error ? 'ERROR ' + ev.error : 'lost · ' + (ev.status || 'no-pay')}`);
+        }
+        setCounts({
+          done: ev.done ?? 0,
+          recovered: ev.recovered ?? 0,
+          errors: ev.errors ?? 0,
+        });
+        break;
+      }
+      case 'webhook': {
+        const t = new Date(ev.ts * 1000).toLocaleTimeString();
+        setTicker(html`<b>${t}</b>  ${ev.event_type}  ${ev.entity_id || ''}`);
+        setNode('webhook', 'ok'); bumpNode('webhook');
+        flashEdge('webhook', 'bus');
+        setNode('bus', 'ok'); bumpNode('bus');
+        flashEdge('bus', 'stats');
+        addLog('ok', `webhook · ${ev.event_type} · ${ev.entity_id || ''}`);
+        break;
+      }
+      case 'batch_stopped': {
+        addLog('accent', 'batch stop requested — finishing in-flight scenarios…');
+        showToast('Stopping batch — in-flight scenarios will finish');
+        break;
+      }
+      case 'batch_end': {
+        setRunning(false);
+        setNode('stats', 'ok'); bumpNode('stats');
+        if (ev.stopped) {
+          showToast('Batch stopped');
+          addLog('accent', `batch stopped · ${ev.done} done · ${ev.recovered} recovered · ${ev.errors} errors`);
+        } else {
+          showToast('Batch complete');
+          addLog('accent', `batch complete · ${ev.done} done · ${ev.recovered} recovered · ${ev.errors} errors`);
+        }
+        break;
+      }
+    }
+  }, [flashEdge, setNode, bumpNode, addLog]);
+
+  const stopBatch = async () => {
+    const resp = await fetch('/api/batch/stop', {method: 'POST'});
+    if (resp.status === 409) showToast('No batch is running');
+    else if (!resp.ok) showToast(`Failed to stop: ${resp.status}`);
+  };
+
+  const startBatch = async () => {
+    if (running) return;
+    const resp = await fetch('/api/batch/start', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({n: nVal, workers: wVal}),
+    });
+    if (resp.status === 409) showToast('A batch is already running');
+    else if (!resp.ok) showToast(`Failed to start: ${resp.status}`);
+  };
+
+  React.useEffect(() => {
+    if (view !== 'stats') return;
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch('/api/stats');
+        const d = await r.json();
+        if (alive) setStats(d);
+      } catch (e) { /* keep old stats */ }
+    };
+    load();
+    const t = setInterval(load, 15000);
+    return () => { alive = false; clearInterval(t); };
+  }, [view]);
+
+  React.useEffect(() => {
+    const connect = () => {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(`${proto}://${location.host}/ws`);
+      ws.onopen = () => setLive(true);
+      ws.onmessage = (m) => { try { handle(JSON.parse(m.data)); } catch (e) { console.error(e); } };
+      ws.onclose = () => { setLive(false); setTimeout(connect, 2000); };
+      ws.onerror = () => ws.close();
+    };
+    connect();
+  }, [handle]);
+
+  const edges = React.useMemo(() => EDGE_DEFS.map(([a, b, sh, th]) => {
+    const active = activeEdges.includes(`${a}-${b}`);
+    return {
+      id: `${a}-${b}`, source: a, target: b,
+      sourceHandle: sh, targetHandle: th,
+      type: 'smoothstep',
+      animated: active,
+      label: EDGE_LABELS[`${a}-${b}`] || '',
+      labelStyle: {fill: active ? '#ffb0a3' : '#9aa3af', fontSize: 11, fontFamily: 'ui-monospace, monospace'},
+      labelBgStyle: {fill: '#1d1f24', fillOpacity: 0.92},
+      labelBgPadding: [5, 2],
+      labelBgBorderRadius: 4,
+      style: {
+        stroke: active ? '#ff6d5a' : '#565b66',
+        strokeWidth: active ? 3 : 2.5,
+      },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: active ? '#ff6d5a' : '#6b7280',
+        width: 22, height: 22,
+      },
+    };
+  }), [activeEdges]);
+
+  const lost = total !== null ? counts.done - counts.recovered : 0;
+
+  return html`
+    <div class="shell">
+      <header>
+        <div class="brand">
+          <span class="logo">MD</span>
+          <span class="name">Mandate Doctor</span>
+          <span class="track">Track 03 · AI Revenue Recovery</span>
+        </div>
+        <div class="view-toggle">
+          <button class=${`view-btn ${view === 'flow' ? 'active' : ''}`}
+            onClick=${() => setView('flow')}>Workflow</button>
+          <button class=${`view-btn ${view === 'stats' ? 'active' : ''}`}
+            onClick=${() => setView('stats')}>Dashboard</button>
+        </div>
+        <div class="controls">
+          <div class="ctl">
+            <label for="nInput">Scenarios</label>
+            <input id="nInput" type="number" min="1" max="2000"
+              value=${nVal}
+              onChange=${e => setNVal(parseInt(e.target.value, 10) || 1)} />
+          </div>
+          <div class="ctl">
+            <label for="wInput">Workers</label>
+            <input id="wInput" type="number" min="1" max="6"
+              value=${wVal}
+              onChange=${e => setWVal(parseInt(e.target.value, 10) || 1)} />
+          </div>
+          <button id="startBtn" onClick=${startBatch} disabled=${running}>
+            ${running ? 'Running…' : 'Run Batch'}
+          </button>
+          ${running ? html`
+            <button class="stop-btn" onClick=${stopBatch}>Stop</button>
+          ` : null}
+        </div>
+        <div class="counters">
+          <div class="counter"><b>${total ?? '–'}</b><small>target</small></div>
+          <div class="counter"><b>${counts.done}</b><small>done</small></div>
+          <div class="counter ok"><b>${counts.recovered}</b><small>recovered</small></div>
+          <div class="counter lost"><b>${lost}</b><small>lost</small></div>
+          <div class="counter err"><b>${counts.errors}</b><small>errors</small></div>
+          <div class="connwrap"><span id="conn" class=${live ? 'live' : ''}></span><small>live</small></div>
+        </div>
+      </header>
+
+      <div class="body-row">
+        ${view === 'stats' ? html`<${AnalyticsView} stats=${stats} />` : html`
+        <div class="flow-wrap">
+          <${ReactFlow}
+            nodes=${nodes}
+            onNodesChange=${onNodesChange}
+            edges=${edges}
+            nodeTypes=${nodeTypes}
+            fitView
+            fitViewOptions=${{padding: 0.12}}
+            minZoom="0.2"
+            maxZoom="1.0"
+            proOptions=${{hideAttribution: true}}
+          >
+            <${Background} variant=${BackgroundVariant.Dots} gap="24" size="1.4" color="#2e3138" />
+            <${Controls} showInteractive=${false} />
+            <${MiniMap}
+              pannable zoomable
+              nodeColor=${() => '#3a3d46'}
+              maskColor="rgba(23,24,28,.75)"
+              style=${{borderRadius: 8, border: '1px solid #3a3d46'}}
+            />
+          <//>
+        </div>
+
+        <aside>
+          <div class="aside-head">
+            <div class="tabs">
+              <button class=${`tab ${tab === 'logs' ? 'active' : ''}`} onClick=${() => setTab('logs')}>
+                Backend Logs
+              </button>
+              <button class=${`tab ${tab === 'execs' ? 'active' : ''}`} onClick=${() => setTab('execs')}>
+                Executions <span class="badge">${execs.length}</span>
+              </button>
+            </div>
+          </div>
+          <div class=${`pane ${tab === 'logs' ? 'active' : ''}`} id="logs">
+            ${logs.length === 0 ? html`
+              <div style=${{color: '#5b606b', padding: '8px 2px'}}>waiting for events…</div>
+            ` : logs.map((l, i) => html`
+              <div class=${`logline ${l.cls}`} key=${logs.length - i}>
+                <span class="lt">${l.t}</span>
+                <span class="lm">${l.text}</span>
+              </div>
+            `)}
+          </div>
+          <div class=${`pane ${tab === 'execs' ? 'active' : ''}`} id="execs">
+            ${execs.length === 0 ? html`
+              <div style=${{color: '#5b606b', padding: '8px 2px'}}>no executions yet — run a batch</div>
+            ` : execs.map(e => html`
+              <div class=${`exec ${e.result.cls === 'unknown' ? 'running' : ''}`} key=${e.key}>
+                <div class="top">
+                  <span class="key">${e.key}</span>
+                  <span class="bank">${e.bank}</span>
+                </div>
+                ${Object.keys(e.stages).length > 0 ? html`
+                  <div class="stages">
+                    ${Object.entries(e.stages).map(([name, st]) => html`
+                      <span class=${`stage ${st}`} key=${name}>${name}</span>
+                    `)}
+                  </div>
+                ` : null}
+                <div class=${`result ${e.result.cls}`}>${e.result.text}</div>
+              </div>
+            `)}
+          </div>
+        </aside>
+        `}
+      </div>
+
+      <div id="ticker">${ticker}</div>
+      <div class=${`toast ${toastMsg ? 'show' : ''}`}>${toastMsg}</div>
+    </div>
+  `;
+}
+
+createRoot(document.getElementById('root')).render(html`<${App} />`);
+</script>
+</body>
+</html>

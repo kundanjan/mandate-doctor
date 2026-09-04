@@ -1,0 +1,103 @@
+{
+  "model_type": "extra_trees_tuned_140",
+  "trained_at": "2026-09-04T11:10:10.722626",
+  "feature_names": [
+    "amount_paise",
+    "retry_prior",
+    "npci_bank_Airtel Payments Bank",
+    "npci_bank_Axis Bank",
+    "npci_bank_Bank Of India",
+    "npci_bank_Bank of Baroda",
+    "npci_bank_Canara Bank",
+    "npci_bank_Federal Bank",
+    "npci_bank_Fino Payments Bank",
+    "npci_bank_HDFC Bank",
+    "npci_bank_Haryana Gramin Bank",
+    "npci_bank_ICICI Bank",
+    "npci_bank_India Post Payments Bank",
+    "npci_bank_Indian Overseas Bank",
+    "npci_bank_Jammu and Kashmir Bank",
+    "npci_bank_Kotak Mahindra Bank",
+    "npci_bank_State Bank of India",
+    "error_class_bd",
+    "error_class_td",
+    "regime_base",
+    "regime_optimistic",
+    "regime_pessimistic"
+  ],
+  "encoding": {
+    "num_cols": [
+      "amount_paise",
+      "retry_prior"
+    ],
+    "cat_cols": [
+      "npci_bank",
+      "error_class",
+      "regime"
+    ]
+  },
+  "hyperparams": {
+    "n_estimators": 100,
+    "max_depth": 8,
+    "min_samples_split": 2,
+    "min_samples_leaf": 1,
+    "max_features": "sqrt",
+    "class_weight": null,
+    "seed": 42,
+    "cv_folds": 5
+  },
+  "metrics": {
+    "status": "ok",
+    "rows": 140,
+    "recovered": 47,
+    "in_sample_accuracy": 0.8357142857142857,
+    "base_rate": 0.3357142857142857,
+    "cv_accuracy": 0.7571428571428571,
+    "cv_auc": 0.813654970760234,
+    "cv_accuracy_std": 0.05714285714285711,
+    "lift_over_base": 0.4214
+  },
+  "top_features": [
+    [
+      "regime_optimistic",
+      0.2058914223738021
+    ],
+    [
+      "regime_pessimistic",
+      0.18185222950484428
+    ],
+    [
+      "amount_paise",
+      0.17263859717153626
+    ],
+    [
+      "retry_prior",
+      0.1135370379405994
+    ],
+    [
+      "npci_bank_Airtel Payments Bank",
+      0.06468105029153408
+    ],
+    [
+      "npci_bank_Bank of Baroda",
+      0.05404555546656152
+    ],
+    [
+      "npci_bank_India Post Payments Bank",
+      0.043600746665437624
+    ],
+    [
+      "regime_base",
+      0.040098327286123996
+    ],
+    [
+      "npci_bank_Federal Bank",
+      0.02693797402118362
+    ],
+    [
+      "npci_bank_State Bank of India",
+      0.02490049171820126
+    ]
+  ],
+  "data_provenance": "labels = API-verified payment-link outcomes from Razorpay test mode; retry_prior = NPCI Jul-2026 bank approval rates; no invented probabilities | frozen 140-row tuned Extra Trees"
+}

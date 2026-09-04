@@ -81,7 +81,7 @@ def decide(
     reasoning: str,
 ) -> Decision:
     """Make a decision based on the classification and retry budget.
-
+    
     Returns a Decision with action, reasoning, and remaining retries.
     """
     mandate_id = attempt.mandate_id
@@ -90,7 +90,7 @@ def decide(
 
     # Fail-safe: if no retries remain, hold regardless of bucket.
     if remaining <= 0:
-        logger.warn(
+        logger.warning(
             "budget_exhausted",
             mandate_id=mandate_id,
             cycle_id=cycle_id,

@@ -30,7 +30,10 @@ Thumbs.db
 
 # Database
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
+training_data_v2.csv
 
 # Secrets
 *.pem
@@ -40,3 +43,7 @@ Thumbs.db
 htmlcov/
 .coverage
 coverage.xml
+gitcode/
+graphify-out/
+dashboard/app.py
+plan.md
