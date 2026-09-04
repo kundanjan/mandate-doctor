@@ -45,3 +45,5 @@ htmlcov/
 coverage.xml
 gitcode/
 graphify-out/
+dashboard/app.py
+plan.md
