@@ -51,6 +51,13 @@ the evaluation simulator. All data is free and sourced directly from NPCI.
 | Weighted BD % | 2.4788% |
 | Weighted TD % | 0.0385% |
 
+## Bank Name Normalization & Mapping
+
+Razorpay test-mode returns standard bank labels such as `"HDFC Bank"`, `"ICICI Bank"`, `"State Bank of India"`, `"Axis Bank"`, `"Canara Bank"`.
+The NPCI AutoPay remitter snapshot uses official NPCI remitter names (e.g. `"HDFC BANK LTD"`, `"ICICI BANK LIMITED"`, `"STATE BANK OF INDIA"`, `"CANARA BANK"`).
+
+The system normalizes both strings via case-insensitive fuzzy substring matching. For example, `"HDFC Bank"` matches `"HDFC BANK LTD"`, mapping the exact published NPCI approval (48.2%), BD (50.8%), and TD (1.0%) rates to the test-mode bank. This prevents mapping bias during batch generation and evaluation.
+
 ## Critical Interpretation Guardrail
 
 The two tables measure **different layers of the payment flow**:

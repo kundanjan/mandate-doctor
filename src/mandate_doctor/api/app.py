@@ -13,6 +13,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import sys
 from datetime import UTC, datetime
 from typing import Any
 
@@ -26,6 +27,9 @@ from mandate_doctor.api.events import bus
 from mandate_doctor.config import settings
 from mandate_doctor.core.idempotency import IdempotencyRepository
 from mandate_doctor.core.scorer import MLScorer
+
+if str(settings.project_root) not in sys.path:
+    sys.path.insert(0, str(settings.project_root))
 
 _scorer = MLScorer()
 
@@ -663,6 +667,20 @@ async def model_status() -> dict[str, Any]:
         "trained_at": artifact.get("trained_at"),
         "metrics": artifact.get("metrics"),
     }
+
+
+@app.get("/api/model/comparison")
+async def model_comparison() -> dict[str, Any]:
+    path = settings.project_root / "models" / "model_comparison.json"
+    if not path.exists():
+        return {"status": "no_data", "models": []}
+    try:
+        models_data = json.loads(path.read_text())
+        valid_models = [m for m in models_data if "error" not in m and m.get("roc_auc", 0) > 0]
+        valid_models.sort(key=lambda m: m.get("roc_auc", 0), reverse=True)
+        return {"status": "ok", "total_benchmarked": len(models_data), "top_models": valid_models[:10]}
+    except Exception as exc:  # noqa: BLE001 - file read/JSON parse must not crash endpoint
+        return {"status": "error", "message": str(exc), "models": []}
 
 
 async def _periodic_trainer() -> None:

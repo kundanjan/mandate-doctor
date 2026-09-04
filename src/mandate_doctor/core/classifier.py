@@ -16,6 +16,8 @@ The AI only fires when rules can't decide — restraint is the signal.
 
 from __future__ import annotations
 
+import asyncio
+
 import structlog
 
 from mandate_doctor.core.codes import lookup_bucket
@@ -89,7 +91,22 @@ def classify(attempt: DebitAttempt) -> tuple[FailureBucket, float, list[str], st
         )
         return bucket, confidence, signals, reasoning
 
-    # Step 3: Ambiguous — default to hold for review
+    # Step 3: LLM classification for truly unknown errors.
+    # Fires only when both deterministic code lookup and pattern matching
+    # produced no result. Falls back to AMBIGUOUS on any failure.
+    llm_bucket, llm_confidence, llm_reasoning = _sync_llm_classify(attempt.error)
+    if llm_bucket is not None:
+        logger.info(
+            "classification_llm",
+            attempt_id=attempt.attempt_id,
+            mandate_id=attempt.mandate_id,
+            bucket=llm_bucket.value,
+            confidence=llm_confidence,
+            error_code=error_code,
+        )
+        return llm_bucket, llm_confidence, ["llm_classification"], llm_reasoning
+
+    # Step 4: True AMBIGUOUS — evidence insufficient to act.
     reasoning = (
         f"Unknown error code '{error_code}' and no pattern match in description — "
         f"holding for human review (never guess on money decisions)"
@@ -102,6 +119,65 @@ def classify(attempt: DebitAttempt) -> tuple[FailureBucket, float, list[str], st
         error_desc=error_desc[:100],
     )
     return FailureBucket.AMBIGUOUS, 0.4, ["unknown_code", "no_pattern_match"], reasoning
+
+
+def _sync_llm_classify(
+    error: ErrorDetail,
+) -> tuple[FailureBucket | None, float, str]:
+    """Synchronous wrapper around the async LLM classifier.
+
+    Returns (bucket, confidence, reasoning) or (None, 0.0, "") if LLM
+    is not configured or fails. Never raises — AMBIGUOUS is the safe default.
+    """
+    from mandate_doctor.services.llm import llm_classify
+
+    try:
+        # If there's already a running event loop (FastAPI / uvicorn context),
+        # run in a new thread to avoid "Event loop is already running" errors.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    llm_classify(
+                        error_code=error.code,
+                        error_description=error.description,
+                        error_source=error.source,
+                        error_step=error.step,
+                    ),
+                )
+                bucket, confidence, reasoning = future.result(timeout=20)
+        else:
+            bucket, confidence, reasoning = asyncio.run(
+                llm_classify(
+                    error_code=error.code,
+                    error_description=error.description,
+                    error_source=error.source,
+                    error_step=error.step,
+                )
+            )
+
+        # If LLM returned AMBIGUOUS, return None so classify() uses its own
+        # AMBIGUOUS path with the original signals for cleaner logging.
+        if bucket == FailureBucket.AMBIGUOUS:
+            return None, 0.0, ""
+        return bucket, confidence, reasoning
+
+    except RuntimeError as exc:
+        # No LLM key configured — expected in eval mode, not an error.
+        if "No LLM API key" in str(exc):
+            logger.debug("llm_not_configured", reason=str(exc)[:80])
+        else:
+            logger.warning("llm_classify_runtime_error", error=str(exc)[:120])
+        return None, 0.0, ""
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("llm_classify_failed", error=str(exc)[:120])
+        return None, 0.0, ""
 
 
 def _score_from_description(error: ErrorDetail) -> tuple[FailureBucket | None, float, list[str]]:

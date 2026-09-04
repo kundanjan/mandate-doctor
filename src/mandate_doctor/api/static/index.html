@@ -224,6 +224,72 @@
   .bar-fill { height: 100%; border-radius: 7px; transition: width .5s ease; }
   .bar-val { width: 110px; font-size: 10.5px; color: var(--muted); font-family: ui-monospace, monospace; }
 
+  /* ---------- Audit trail card ---------- */
+  .audit-card {
+    background: var(--node); border: 1px solid #5b4a8a;
+    border-radius: 12px; padding: 16px 20px; margin-bottom: 16px;
+  }
+  .audit-card h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+    color: #c084fc; margin-bottom: 12px; font-weight: 700;
+  }
+  .audit-row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+  .audit-stat {
+    background: #2a2438; border: 1px solid #5b4a8a; border-radius: 9px;
+    padding: 10px 16px; text-align: center; min-width: 90px;
+  }
+  .audit-stat b { font-size: 22px; font-weight: 800; display: block; color: #c084fc; font-variant-numeric: tabular-nums; }
+  .audit-stat small { color: #9b88c4; font-size: 9.5px; text-transform: uppercase; letter-spacing: .7px; }
+  .audit-right { flex: 1; min-width: 220px; }
+  .audit-right p { font-size: 11px; color: #9b88c4; margin-bottom: 10px; line-height: 1.6; }
+  .audit-demo-btn {
+    background: #5b4a8a; color: #fff; border: none; border-radius: 8px;
+    padding: 8px 16px; font-size: 12px; font-weight: 700; cursor: pointer;
+    transition: all .15s;
+  }
+  .audit-demo-btn:hover { background: #7c5fd4; }
+  .audit-demo-btn:disabled { opacity: .5; cursor: wait; }
+  .audit-verdict {
+    margin-top: 10px; padding: 9px 13px; border-radius: 8px;
+    font-size: 12px; font-weight: 700;
+  }
+  .audit-verdict.pass { background: #12331f; color: #4ade80; border: 1px solid #2f6b46; }
+  .audit-verdict.fail { background: #3d1515; color: #f87171; border: 1px solid #7a3535; }
+
+  /* ---------- SHAP explainer card ---------- */
+  .explainer-card {
+    background: var(--node); border: 1px solid #1e4a6b;
+    border-radius: 12px; padding: 16px 20px; margin-bottom: 16px;
+  }
+  .explainer-card h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+    color: #60a5fa; margin-bottom: 12px; font-weight: 700;
+  }
+  .explainer-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  .explainer-form { display: flex; flex-direction: column; gap: 8px; min-width: 220px; }
+  .explainer-form label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; }
+  .explainer-form input, .explainer-form select {
+    background: #26282f; color: #fff; border: 1px solid #3a3d46;
+    border-radius: 7px; padding: 6px 10px; font-size: 12px; outline: none; width: 200px;
+  }
+  .explainer-form input:focus, .explainer-form select:focus { border-color: #60a5fa; }
+  .explain-btn {
+    background: #1e4a6b; color: #fff; border: none; border-radius: 8px;
+    padding: 8px 16px; font-size: 12px; font-weight: 700; cursor: pointer;
+    margin-top: 4px; transition: all .15s;
+  }
+  .explain-btn:hover { background: #2563eb; }
+  .explain-btn:disabled { opacity: .5; cursor: wait; }
+  .explainer-result { flex: 1; min-width: 280px; }
+  .score-badge {
+    display: inline-block; padding: 5px 14px; border-radius: 20px;
+    font-size: 13px; font-weight: 800; margin-bottom: 12px;
+  }
+  .score-badge.recovery { background: #12331f; color: #4ade80; border: 1px solid #2f6b46; }
+  .score-badge.retry { background: #1c2a00; color: #a3e635; border: 1px solid #3f6212; }
+  .score-badge.escalate { background: #3d1515; color: #f87171; border: 1px solid #7a3535; }
+  .score-badge.none { background: #26282f; color: #9aa3af; border: 1px solid #3a3d46; }
+
   /* ---------- Resize controls ---------- */
   .react-flow__resize-control.line { border-color: var(--accent); }
   .react-flow__resize-control.handle {
@@ -454,6 +520,165 @@ Chart.defaults.color = '#9aa3af';
 Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
 Chart.defaults.font.family = "'Inter', 'Segoe UI', system-ui, sans-serif";
 
+/* ================= Audit Trail Card ================= */
+function AuditCard() {
+  const [idem, setIdem] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [verdict, setVerdict] = React.useState(null);
+
+  React.useEffect(() => {
+    fetch('/api/idempotency/stats').then(r => r.json()).then(setIdem).catch(() => {});
+  }, []);
+
+  const runDemo = async () => {
+    setLoading(true); setVerdict(null);
+    try {
+      const r = await fetch('/api/demo/duplicate-webhooks', {method: 'POST'});
+      const d = await r.json();
+      setVerdict(d);
+      const fresh = await fetch('/api/idempotency/stats').then(x => x.json());
+      setIdem(fresh);
+    } catch(e) {
+      setVerdict({verdict: 'ERROR', error: String(e)});
+    } finally { setLoading(false); }
+  };
+
+  return html`
+    <div class="audit-card">
+      <h3>Audit Trail — Exactly-Once Idempotency</h3>
+      <div class="audit-row">
+        <div class="audit-stat"><b>${idem?.claims ?? '–'}</b><small>total claims</small></div>
+        <div class="audit-stat"><b>${idem?.executed ?? '–'}</b><small>executed</small></div>
+        <div class="audit-stat"><b>${idem?.deduplicated ?? '–'}</b><small>deduplicated</small></div>
+        <div class="audit-right">
+          <p>
+            Every <code>payment.failed</code> webhook atomically claims a SQLite row
+            (PENDING → DECIDED → EXECUTED). Duplicate deliveries are deduplicated
+            at the database level — exactly one recovery action runs per failed payment.
+          </p>
+          <button class="audit-demo-btn" onClick=${runDemo} disabled=${loading}>
+            ${loading ? 'Running…' : '▶ Fire 10 duplicate webhooks'}
+          </button>
+          ${verdict ? html`
+            <div class=${`audit-verdict ${verdict.verdict === 'exactly-once holds' ? 'pass' : 'fail'}`}>
+              ${verdict.webhooks_fired} fired → ${verdict.executed} executed · ${verdict.deduplicated} deduplicated
+              <br/>${verdict.verdict?.toUpperCase()}
+            </div>
+          ` : null}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ================= SHAP Explainer Card ================= */
+function ExplainerCard() {
+  const [form, setForm] = React.useState({
+    npci_bank: 'Canara Bank', error_class: 'bd',
+    amount_paise: 19900, regime: 'optimistic', retry_prior: 0.27,
+  });
+  const [result, setResult] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const shapRef = React.useRef(null);
+  const shapChart = React.useRef(null);
+
+  const explain = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch('/api/model/explain', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({...form, amount_paise: Number(form.amount_paise), retry_prior: Number(form.retry_prior)}),
+      });
+      const d = await r.json();
+      setResult(d);
+    } catch(e) {
+      setResult({error: String(e)});
+    } finally { setLoading(false); }
+  };
+
+  React.useEffect(() => {
+    if (!result?.top_contributions || !shapRef.current) return;
+    if (shapChart.current) { shapChart.current.destroy(); shapChart.current = null; }
+    const contribs = result.top_contributions.slice(0, 8);
+    shapChart.current = new Chart(shapRef.current, {
+      type: 'bar',
+      data: {
+        labels: contribs.map(c => c.feature.replace(/_/g,' ').replace(/npci bank/,'bank').replace(/error class/,'class')),
+        datasets: [{
+          data: contribs.map(c => c.shap_value),
+          backgroundColor: contribs.map(c => c.shap_value >= 0 ? '#22c55e' : '#f87171'),
+          borderRadius: 5, barPercentage: 0.65,
+        }],
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ` SHAP: ${ctx.raw > 0 ? '+' : ''}${ctx.raw.toFixed(3)}` } } },
+        scales: {
+          x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { font: {size:10} },
+            title: { display: true, text: '← hurts recovery   |   helps recovery →', color: '#9aa3af', font:{size:9} } },
+          y: { grid: { display: false }, ticks: { font: {size:10} } },
+        },
+      },
+    });
+    return () => { if (shapChart.current) { shapChart.current.destroy(); shapChart.current = null; } };
+  }, [result]);
+
+  const badgeClass = result?.decision === 'RECOVERY_LINK' ? 'recovery'
+    : result?.decision === 'RETRY_LATER' ? 'retry'
+    : result?.decision === 'ESCALATE' ? 'escalate' : 'none';
+
+  const set = (k) => (e) => setForm(f => ({...f, [k]: e.target.value}));
+
+  return html`
+    <div class="explainer-card">
+      <h3>ML Explainer — Why This Decision? (SHAP)</h3>
+      <div class="explainer-row">
+        <div class="explainer-form">
+          <label>NPCI Bank</label>
+          <input id="xpBankInput" value=${form.npci_bank} onInput=${set('npci_bank')} />
+          <label>Error Class</label>
+          <select id="xpClassInput" value=${form.error_class} onChange=${set('error_class')}>
+            <option value="bd">BD — Business Decline</option>
+            <option value="td">TD — Technical Decline</option>
+            <option value="am">AM — Authentication / Mandate</option>
+            <option value="st">ST — Stop / Terminal</option>
+          </select>
+          <label>Amount (paise)</label>
+          <input id="xpAmtInput" type="number" value=${form.amount_paise} onInput=${set('amount_paise')} />
+          <label>Regime</label>
+          <select id="xpRegimeInput" value=${form.regime} onChange=${set('regime')}>
+            <option value="optimistic">Optimistic (off-peak)</option>
+            <option value="base">Base</option>
+            <option value="pessimistic">Pessimistic (peak hours)</option>
+          </select>
+          <label>NPCI Retry Prior (bank approval rate)</label>
+          <input id="xpPriorInput" type="number" step="0.01" min="0" max="1" value=${form.retry_prior} onInput=${set('retry_prior')} />
+          <button class="explain-btn" onClick=${explain} disabled=${loading} id="explainBtn">
+            ${loading ? 'Scoring…' : '▶ Explain decision'}
+          </button>
+        </div>
+        <div class="explainer-result">
+          ${result?.error ? html`<div style=${{color:'#f87171',fontSize:12}}>${result.error}</div>` : null}
+          ${result?.decision ? html`
+            <span class=${`score-badge ${badgeClass}`}>
+              ${result.decision} — P(recovery) = ${(result.score * 100).toFixed(1)}%
+            </span>
+          ` : html`<div style=${{color:'#5b606b',fontSize:12,paddingTop:8}}>Fill in the form and click Explain to see SHAP feature contributions.</div>`}
+          ${result?.top_contributions ? html`
+            <div style=${{position:'relative',height:220,marginTop:8}}>
+              <canvas ref=${shapRef} />
+            </div>
+            <div style=${{fontSize:10,color:'#6b7280',marginTop:6}}>
+              Base value: ${result.base_value?.toFixed(3)} · Top ${result.top_contributions.length} of ${result.all_contributions?.length} features shown
+            </div>
+          ` : null}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function CChart({ config, height }) {
   const ref = React.useRef(null);
   React.useEffect(() => {
@@ -566,11 +791,46 @@ function AnalyticsView({ stats }) {
     },
   }), [stats]);
 
+/* ================= Model Comparison Card ================= */
+function ModelComparisonCard() {
+  const [comp, setComp] = React.useState(null);
+  React.useEffect(() => {
+    fetch('/api/model/comparison').then(r => r.json()).then(setComp).catch(() => {});
+  }, []);
+
+  if (!comp || comp.status !== 'ok' || !comp.top_models?.length) return null;
+
+  return html`
+    <div class="chart-card" style=${{gridColumn: '1 / -1'}}>
+      <h3>43-Model Benchmark Comparison (ROC-AUC) — Why GradientBoosting / Random Forest?</h3>
+      <div style=${{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginTop: '8px'}}>
+        ${comp.top_models.slice(0, 6).map(m => html`
+          <div style=${{background: '#26282f', border: '1px solid #3a3d46', borderRadius: '8px', padding: '10px 12px'}} key=${m.model}>
+            <div style=${{fontSize: '12px', fontWeight: 700, color: '#e8eaed'}}>${m.model}</div>
+            <div style=${{display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '11px', color: '#8b9099'}}>
+              <span>ROC AUC: <b style=${{color: '#c084fc'}}>${(m.roc_auc || 0).toFixed(3)}</b></span>
+              <span>Acc: <b style=${{color: '#4ade80'}}>${((m.accuracy || 0) * 100).toFixed(1)}%</b></span>
+            </div>
+          </div>
+        `)}
+      </div>
+    </div>
+  `;
+}
+
   if (!stats || s.status === 'no_data') {
-    return html`<div class="stats-wrap"><div class="stats-empty">No data yet — run a batch first.</div></div>`;
+    return html`
+      <div class="stats-wrap">
+        <${AuditCard} />
+        <${ExplainerCard} />
+        <div class="stats-empty">No batch data yet — run a batch first to see outcome charts.</div>
+      </div>
+    `;
   }
   return html`
     <div class="stats-wrap">
+      <${AuditCard} />
+      <${ExplainerCard} />
       <div class="kpi-grid">
         <div class="kpi"><b>${n}</b><small>total scenarios</small></div>
         <div class="kpi ok"><b>${rec}</b><small>recovered</small></div>
@@ -586,6 +846,7 @@ function AnalyticsView({ stats }) {
 
 
       <div class="charts">
+        <${ModelComparisonCard} />
         <div class="chart-card">
           <h3>Overall outcomes</h3>
           <${CChart} config=${doughnutCfg} height=${240} />
