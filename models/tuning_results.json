@@ -1,0 +1,371 @@
+[
+  {
+    "model": "Extra Trees",
+    "best_params": {
+      "n_estimators": 100,
+      "min_samples_split": 2,
+      "min_samples_leaf": 1,
+      "max_features": "sqrt",
+      "max_depth": 8,
+      "class_weight": null
+    },
+    "best_auc_mean": 0.8354,
+    "best_auc_std": 0.0674,
+    "top5": [
+      {
+        "rank": 1,
+        "params": {
+          "n_estimators": 100,
+          "min_samples_split": 2,
+          "min_samples_leaf": 1,
+          "max_features": "sqrt",
+          "max_depth": 8,
+          "class_weight": null
+        },
+        "auc_mean": 0.8354,
+        "auc_std": 0.0674
+      },
+      {
+        "rank": 2,
+        "params": {
+          "n_estimators": 100,
+          "min_samples_split": 2,
+          "min_samples_leaf": 4,
+          "max_features": "log2",
+          "max_depth": 6,
+          "class_weight": "balanced"
+        },
+        "auc_mean": 0.8342,
+        "auc_std": 0.0767
+      },
+      {
+        "rank": 3,
+        "params": {
+          "n_estimators": 300,
+          "min_samples_split": 2,
+          "min_samples_leaf": 1,
+          "max_features": "sqrt",
+          "max_depth": 8,
+          "class_weight": "balanced"
+        },
+        "auc_mean": 0.8319,
+        "auc_std": 0.0766
+      },
+      {
+        "rank": 3,
+        "params": {
+          "n_estimators": 100,
+          "min_samples_split": 5,
+          "min_samples_leaf": 4,
+          "max_features": "log2",
+          "max_depth": 10,
+          "class_weight": "balanced"
+        },
+        "auc_mean": 0.8319,
+        "auc_std": 0.0757
+      },
+      {
+        "rank": 5,
+        "params": {
+          "n_estimators": 200,
+          "min_samples_split": 2,
+          "min_samples_leaf": 1,
+          "max_features": "sqrt",
+          "max_depth": 6,
+          "class_weight": "balanced"
+        },
+        "auc_mean": 0.8316,
+        "auc_std": 0.0695
+      }
+    ],
+    "total_configs": 200
+  },
+  {
+    "model": "HistGBoost",
+    "best_params": {
+      "min_samples_leaf": 20,
+      "max_leaf_nodes": 63,
+      "max_iter": 200,
+      "max_depth": 5,
+      "learning_rate": 0.01,
+      "l2_regularization": 0.0,
+      "class_weight": "balanced"
+    },
+    "best_auc_mean": 0.8299,
+    "best_auc_std": 0.0477,
+    "top5": [
+      {
+        "rank": 1,
+        "params": {
+          "min_samples_leaf": 20,
+          "max_leaf_nodes": 63,
+          "max_iter": 200,
+          "max_depth": 5,
+          "learning_rate": 0.01,
+          "l2_regularization": 0.0,
+          "class_weight": "balanced"
+        },
+        "auc_mean": 0.8299,
+        "auc_std": 0.0477
+      },
+      {
+        "rank": 2,
+        "params": {
+          "min_samples_leaf": 20,
+          "max_leaf_nodes": 31,
+          "max_iter": 200,
+          "max_depth": 7,
+          "learning_rate": 0.01,
+          "l2_regularization": 0.0,
+          "class_weight": null
+        },
+        "auc_mean": 0.8296,
+        "auc_std": 0.0502
+      },
+      {
+        "rank": 2,
+        "params": {
+          "min_samples_leaf": 20,
+          "max_leaf_nodes": 63,
+          "max_iter": 200,
+          "max_depth": 5,
+          "learning_rate": 0.01,
+          "l2_regularization": 0.0,
+          "class_weight": null
+        },
+        "auc_mean": 0.8296,
+        "auc_std": 0.0502
+      },
+      {
+        "rank": 4,
+        "params": {
+          "min_samples_leaf": 20,
+          "max_leaf_nodes": 63,
+          "max_iter": 200,
+          "max_depth": null,
+          "learning_rate": 0.01,
+          "l2_regularization": 0.1,
+          "class_weight": "balanced"
+        },
+        "auc_mean": 0.8287,
+        "auc_std": 0.048
+      },
+      {
+        "rank": 5,
+        "params": {
+          "min_samples_leaf": 20,
+          "max_leaf_nodes": 15,
+          "max_iter": 200,
+          "max_depth": 7,
+          "learning_rate": 0.01,
+          "l2_regularization": 0.1,
+          "class_weight": null
+        },
+        "auc_mean": 0.8285,
+        "auc_std": 0.0505
+      }
+    ],
+    "total_configs": 200
+  },
+  {
+    "model": "RBF SVM",
+    "best_params": {
+      "gamma": 0.1,
+      "class_weight": "balanced",
+      "C": 1.0
+    },
+    "best_auc_mean": 0.824,
+    "best_auc_std": 0.0694,
+    "top5": [
+      {
+        "rank": 1,
+        "params": {
+          "gamma": 0.1,
+          "class_weight": "balanced",
+          "C": 1.0
+        },
+        "auc_mean": 0.824,
+        "auc_std": 0.0694
+      },
+      {
+        "rank": 2,
+        "params": {
+          "gamma": "scale",
+          "class_weight": "balanced",
+          "C": 1.0
+        },
+        "auc_mean": 0.8229,
+        "auc_std": 0.0691
+      },
+      {
+        "rank": 3,
+        "params": {
+          "gamma": 0.05,
+          "class_weight": null,
+          "C": 10.0
+        },
+        "auc_mean": 0.8219,
+        "auc_std": 0.0715
+      },
+      {
+        "rank": 4,
+        "params": {
+          "gamma": 0.05,
+          "class_weight": "balanced",
+          "C": 5.0
+        },
+        "auc_mean": 0.8216,
+        "auc_std": 0.0727
+      },
+      {
+        "rank": 5,
+        "params": {
+          "gamma": "auto",
+          "class_weight": "balanced",
+          "C": 5.0
+        },
+        "auc_mean": 0.8216,
+        "auc_std": 0.0826
+      }
+    ],
+    "total_configs": 72
+  },
+  {
+    "model": "Linear SVM",
+    "best_params": {
+      "C": 1.0,
+      "class_weight": "balanced"
+    },
+    "best_auc_mean": 0.8229,
+    "best_auc_std": 0.0691,
+    "top5": [
+      {
+        "rank": 1,
+        "params": {
+          "C": 1.0,
+          "class_weight": "balanced"
+        },
+        "auc_mean": 0.8229,
+        "auc_std": 0.0691
+      },
+      {
+        "rank": 2,
+        "params": {
+          "C": 5.0,
+          "class_weight": null
+        },
+        "auc_mean": 0.8186,
+        "auc_std": 0.0752
+      },
+      {
+        "rank": 3,
+        "params": {
+          "C": 10.0,
+          "class_weight": null
+        },
+        "auc_mean": 0.8142,
+        "auc_std": 0.0707
+      },
+      {
+        "rank": 4,
+        "params": {
+          "C": 5.0,
+          "class_weight": "balanced"
+        },
+        "auc_mean": 0.8095,
+        "auc_std": 0.0843
+      },
+      {
+        "rank": 5,
+        "params": {
+          "C": 1.0,
+          "class_weight": null
+        },
+        "auc_mean": 0.808,
+        "auc_std": 0.0714
+      }
+    ],
+    "total_configs": 12
+  },
+  {
+    "model": "Random Forest",
+    "best_params": {
+      "n_estimators": 500,
+      "min_samples_split": 10,
+      "min_samples_leaf": 4,
+      "max_features": "sqrt",
+      "max_depth": null,
+      "class_weight": "balanced"
+    },
+    "best_auc_mean": 0.8192,
+    "best_auc_std": 0.0606,
+    "top5": [
+      {
+        "rank": 1,
+        "params": {
+          "n_estimators": 500,
+          "min_samples_split": 10,
+          "min_samples_leaf": 4,
+          "max_features": "sqrt",
+          "max_depth": null,
+          "class_weight": "balanced"
+        },
+        "auc_mean": 0.8192,
+        "auc_std": 0.0606
+      },
+      {
+        "rank": 2,
+        "params": {
+          "n_estimators": 300,
+          "min_samples_split": 2,
+          "min_samples_leaf": 2,
+          "max_features": "sqrt",
+          "max_depth": 4,
+          "class_weight": null
+        },
+        "auc_mean": 0.8184,
+        "auc_std": 0.0556
+      },
+      {
+        "rank": 3,
+        "params": {
+          "n_estimators": 200,
+          "min_samples_split": 2,
+          "min_samples_leaf": 2,
+          "max_features": "log2",
+          "max_depth": 4,
+          "class_weight": "balanced"
+        },
+        "auc_mean": 0.8183,
+        "auc_std": 0.0601
+      },
+      {
+        "rank": 4,
+        "params": {
+          "n_estimators": 300,
+          "min_samples_split": 2,
+          "min_samples_leaf": 2,
+          "max_features": "log2",
+          "max_depth": 6,
+          "class_weight": "balanced"
+        },
+        "auc_mean": 0.8182,
+        "auc_std": 0.0643
+      },
+      {
+        "rank": 4,
+        "params": {
+          "n_estimators": 300,
+          "min_samples_split": 2,
+          "min_samples_leaf": 1,
+          "max_features": "sqrt",
+          "max_depth": 8,
+          "class_weight": null
+        },
+        "auc_mean": 0.8182,
+        "auc_std": 0.0703
+      }
+    ],
+    "total_configs": 200
+  }
+]
