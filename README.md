@@ -53,6 +53,32 @@ These sources establish that recurring-payment failures and recovery are materia
 
 The public evidence supports testing a context-aware recovery policy. It does not justify claiming a guaranteed percentage increase.
 
+## System Architecture & Mandate Ecosystem Flow
+
+A 1-glance view of how **Mandate Doctor** intercepts payment failures and recovers revenue:
+
+```mermaid
+graph LR
+    subgraph ECOSYSTEM ["Payment Flow"]
+        Debit["Mandate Debit"] --> Gateway["Razorpay / NPCI"]
+        Gateway -->|"Success (~30%)"| Paid["Revenue Recovered"]
+        Gateway -->|"Failure (~70%)"| Doctor["Mandate Doctor Engine"]
+    end
+
+    subgraph SYSTEM ["Mandate Doctor (Our System)"]
+        Doctor --> Gate["Safety Gate & ML Scorer<br/>Enforces NPCI 1+3 Cap"]
+        Gate -->|"Low Balance / TD"| R1["Off-Peak Smart Retry"]
+        Gate -->|"Auth Failure"| R2["Instant Payment Link"]
+        Gate -->|"Mandate Revoked"| R3["Re-Consent Request"]
+    end
+
+    R1 -->|"Recovered Debit"| Paid
+    R2 -->|"Customer Paid"| Paid
+
+    style SYSTEM fill:#1e1e24,stroke:#6366f1,stroke-width:2px,color:#fff
+    style ECOSYSTEM fill:#18181b,stroke:#3f3f46,stroke-width:1px,color:#fff
+```
+
 ## Proposed System
 
 Mandate Doctor does not guess the hidden bank reason behind a generic `payment_declined`. It retrieves available evidence, estimates which permitted recovery action is most useful, applies deterministic safety constraints, executes the action, and records the outcome.
