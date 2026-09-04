@@ -21,14 +21,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import joblib
 import numpy as np
 import structlog
+from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import GradientBoostingClassifier  # type: ignore[import-untyped]
-from sklearn.linear_model import LogisticRegression  # type: ignore[import-untyped]
-from sklearn.model_selection import cross_val_score, StratifiedKFold  # type: ignore[import-untyped]
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import StratifiedKFold, cross_val_score  # type: ignore[import-untyped]
 from sklearn.pipeline import Pipeline  # type: ignore[import-untyped]
-from sklearn.preprocessing import StandardScaler  # type: ignore[import-untyped]
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler  # type: ignore[import-untyped]
 
 logger = structlog.get_logger(__name__)
 
@@ -251,38 +252,84 @@ def load_model(path: Path | None = None) -> dict[str, Any]:
 
 
 
-def train_sklearn(db_path: Path | None = None, out_dir: Path | None = None) -> dict[str, Any]:
-    """Train using sklearn GradientBoosting + LogisticRegression ensemble.
+def _build_pipeline_from_rows(rows: list[dict[str, Any]]) -> tuple[Pipeline, list[str]]:
+    """Build an sklearn pipeline with proper preprocessing from raw rows.
 
-    Uses GradientBoosting for prediction and LogReg for interpretability.
-    Reports cross-validated accuracy and AUC.
+    Matches the preprocessing used in model_comparison.py so the pipeline
+    can be used for live scoring.
+    """
+    num_cols = ["amount_paise", "retry_prior"]
+    cat_cols = ["npci_bank", "error_class", "regime"]
+
+    num_pipeline = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+    ])
+    cat_pipeline = Pipeline([
+        ("imputer", SimpleImputer(strategy="constant", fill_value="missing")),
+        ("ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+    ])
+
+    preprocessor = ColumnTransformer([
+        ("num", num_pipeline, num_cols),
+        ("cat", cat_pipeline, cat_cols),
+    ], remainder="drop")
+
+    pipeline = Pipeline([
+        ("prep", preprocessor),
+        ("clf", GradientBoostingClassifier(
+            n_estimators=200, max_depth=5, learning_rate=0.01,
+            min_samples_leaf=20, random_state=RANDOM_SEED,
+        )),
+    ])
+
+    return pipeline, num_cols + cat_cols
+
+
+def _rows_to_X(rows: list[dict[str, Any]], feature_cols: list[str]) -> np.ndarray:
+    """Convert raw dicts to feature matrix matching the pipeline."""
+    import pandas as pd  # type: ignore[import-untyped]
+    df = pd.DataFrame(rows)
+    for col in feature_cols:
+        if col not in df.columns:
+            df[col] = 0
+    return df[feature_cols]
+
+
+def train_sklearn(db_path: Path | None = None, out_dir: Path | None = None) -> dict[str, Any]:
+    """Train tuned GradientBoosting with proper preprocessing pipeline.
+
+    Saves:
+    - models/recovery_model.json  — metrics + metadata
+    - models/recovery_pipeline.joblib — fitted sklearn Pipeline for live scoring
     """
     rows = load_rows(db_path)
     if len(rows) < 20:
         logger.warning("insufficient_data", rows=len(rows), minimum=20)
         return {"status": "insufficient_data", "rows": len(rows)}
 
-    X, y, feature_names, encoding = build_design(rows)
+    pipeline, feature_cols = _build_pipeline_from_rows(rows)
+    X = _rows_to_X(rows, feature_cols)
+    y = np.array([float(r["recovered"]) for r in rows])
 
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_SEED)
 
-    # Primary model: GradientBoosting
-    gb = GradientBoostingClassifier(
-        n_estimators=100, max_depth=3, learning_rate=0.05, random_state=RANDOM_SEED
-    )
-    gb_acc = cross_val_score(gb, X, y, cv=cv, scoring="accuracy")
-    gb_auc = cross_val_score(gb, X, y, cv=cv, scoring="roc_auc")
-    gb.fit(X, y)
-
-    # Interpretable model: LogReg
-    lr = Pipeline([("scaler", StandardScaler()), ("clf", LogisticRegression(
-        solver="liblinear", max_iter=1000, C=1.0, random_state=RANDOM_SEED
-    ))])
-    lr_acc = cross_val_score(lr, X, y, cv=cv, scoring="accuracy")
-    lr.fit(X, y)
+    gb_acc = cross_val_score(pipeline, X, y, cv=cv, scoring="accuracy")
+    gb_auc = cross_val_score(pipeline, X, y, cv=cv, scoring="roc_auc")
+    pipeline.fit(X, y)
 
     base_rate = float(y.mean())
-    insample_acc = float((gb.predict(X) == y).mean())
+    insample_acc = float((pipeline.predict(X) == y).mean())
+
+    # Feature importances from the GradientBoosting step
+    clf = pipeline.named_steps["clf"]
+    ohe = pipeline.named_steps["prep"].named_transformers_["cat"].named_steps["ohe"]
+    cat_feature_names = list(ohe.get_feature_names_out(["npci_bank", "error_class", "regime"]))
+    all_feature_names = ["amount_paise", "retry_prior"] + cat_feature_names
+    importances = sorted(
+        zip(all_feature_names, [float(x) for x in clf.feature_importances_]),
+        key=lambda x: x[1], reverse=True,
+    )
 
     metrics = {
         "status": "ok",
@@ -294,24 +341,19 @@ def train_sklearn(db_path: Path | None = None, out_dir: Path | None = None) -> d
         "cv_auc": float(gb_auc.mean()),
         "cv_accuracy_std": float(gb_acc.std()),
         "lift_over_base": round(float(gb_acc.mean()) - base_rate, 4),
-        "lr_cv_accuracy": float(lr_acc.mean()),
     }
 
-    # Save GB feature importances for interpretability
-    importances = sorted(
-        zip(feature_names, [float(x) for x in gb.feature_importances_]),
-        key=lambda x: x[1], reverse=True
-    )
-
     artifact = {
-        "model_type": "gradient_boosting_sklearn",
+        "model_type": "gradient_boosting_sklearn_tuned",
         "trained_at": __import__("datetime").datetime.now().isoformat(),
-        "feature_names": feature_names,
-        "weights": [float(x) for x in gb.feature_importances_],
-        "encoding": encoding,
+        "feature_names": all_feature_names,
+        "encoding": {
+            "num_cols": ["amount_paise", "retry_prior"],
+            "cat_cols": ["npci_bank", "error_class", "regime"],
+        },
         "hyperparams": {
-            "n_estimators": 100, "max_depth": 3, "learning_rate": 0.05,
-            "seed": RANDOM_SEED, "cv_folds": 5,
+            "n_estimators": 200, "max_depth": 5, "learning_rate": 0.01,
+            "min_samples_leaf": 20, "seed": RANDOM_SEED, "cv_folds": 5,
         },
         "metrics": metrics,
         "top_features": importances[:10],
@@ -324,9 +366,16 @@ def train_sklearn(db_path: Path | None = None, out_dir: Path | None = None) -> d
 
     out = out_dir or MODELS_DIR
     out.mkdir(exist_ok=True)
-    path = out / "recovery_model.json"
-    path.write_text(json.dumps(artifact, indent=2))
-    logger.info("model_saved_gb", path=str(path), **metrics)
+
+    # Save JSON metadata
+    json_path = out / "recovery_model.json"
+    json_path.write_text(json.dumps(artifact, indent=2))
+
+    # Save fitted pipeline for live scoring
+    joblib_path = out / "recovery_pipeline.joblib"
+    joblib.dump(pipeline, joblib_path)
+
+    logger.info("model_saved_gb_tuned", json_path=str(json_path), pipeline_path=str(joblib_path), **metrics)
     return artifact
 
 
@@ -337,6 +386,9 @@ def train_incremental(min_new_rows: int = 5) -> dict[str, Any]:
     a metrics line to models/training_log.jsonl, so training progress is
     auditable and the policy engine always has the latest artifact.
     """
+    # Frozen guard — prevents nightly degraded model from overwriting the tuned 140-row model
+    if (MODELS_DIR / "FROZEN").exists():
+        return {"status": "skipped", "reason": "model frozen — delete models/FROZEN to re-enable training", "rows": len(load_rows())}
     log_path = MODELS_DIR / "training_log.jsonl"
     rows = load_rows()
     last_rows = 0
