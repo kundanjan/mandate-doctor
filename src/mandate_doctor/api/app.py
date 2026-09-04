@@ -13,10 +13,10 @@ import asyncio
 import hashlib
 import hmac
 import json
+import sys
 from datetime import UTC, datetime
 from typing import Any
 
-import sys
 import structlog
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -679,7 +679,7 @@ async def model_comparison() -> dict[str, Any]:
         valid_models = [m for m in models_data if "error" not in m and m.get("roc_auc", 0) > 0]
         valid_models.sort(key=lambda m: m.get("roc_auc", 0), reverse=True)
         return {"status": "ok", "total_benchmarked": len(models_data), "top_models": valid_models[:10]}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - file read/JSON parse must not crash endpoint
         return {"status": "error", "message": str(exc), "models": []}
 
 

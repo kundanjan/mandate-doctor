@@ -17,6 +17,7 @@ The AI only fires when rules can't decide — restraint is the signal.
 from __future__ import annotations
 
 import asyncio
+
 import structlog
 
 from mandate_doctor.core.codes import lookup_bucket

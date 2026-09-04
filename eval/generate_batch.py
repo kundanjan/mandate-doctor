@@ -30,7 +30,7 @@ import csv
 import json
 import random
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from mandate_doctor.core.models import DebitAttempt, ErrorDetail
@@ -38,7 +38,7 @@ from mandate_doctor.core.models import DebitAttempt, ErrorDetail
 # Fixed base timestamp for reproducible fixtures.
 # All generated attempts use BASE_TIMESTAMP + i * 1 hour so that the same
 # seed always produces identical timestamps across runs.
-BASE_TIMESTAMP = datetime(2026, 7, 1, 0, 0, 0, tzinfo=timezone.utc)
+BASE_TIMESTAMP = datetime(2026, 7, 1, 0, 0, 0, tzinfo=UTC)
 
 # ---------------------------------------------------------------------------
 # Frozen calibration file paths
