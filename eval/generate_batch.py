@@ -30,9 +30,15 @@ import csv
 import json
 import random
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from mandate_doctor.core.models import DebitAttempt, ErrorDetail
+
+# Fixed base timestamp for reproducible fixtures.
+# All generated attempts use BASE_TIMESTAMP + i * 1 hour so that the same
+# seed always produces identical timestamps across runs.
+BASE_TIMESTAMP = datetime(2026, 7, 1, 0, 0, 0, tzinfo=timezone.utc)
 
 # ---------------------------------------------------------------------------
 # Frozen calibration file paths
@@ -69,6 +75,17 @@ SCENARIO_PROFILES: dict[str, dict[str, float]] = {
         "low_balance": 0.25,
         "ambiguous_customer_action": 0.20,
         "stop_terminal": 0.55,
+    },
+    "technical_heavy": {
+        # High proportion of transient bank/gateway failures — these are
+        # retryable and where the timing-aware policy outperforms blind T+1.
+        # BD sub-composition is secondary; the TD share is driven by the real
+        # calibrated NPCI per-bank TD% (see generate_batch logic below).
+        # This profile biases the BD split to simulate a tech-failure-heavy
+        # merchant (e.g. neobank or infrastructure-heavy biller).
+        "low_balance": 0.20,
+        "ambiguous_customer_action": 0.65,
+        "stop_terminal": 0.15,
     },
     "adversarial_generic": {
         # All failures return generic `payment_declined` with no description.
@@ -260,6 +277,8 @@ def generate_batch(
             DebitAttempt(
                 attempt_id=f"att_synthetic_{scenario[:4]}_{seed}_{i:04d}",
                 mandate_id=f"md_synthetic_{scenario[:4]}_{seed}_{i % 100:03d}",
+                cycle_id=f"cyc_{seed}_{i // 100:02d}",
+                timestamp=BASE_TIMESTAMP + timedelta(hours=i),
                 amount=rng.choice(AMOUNTS_PAISE),
                 result="failed",
                 error=ErrorDetail(
