@@ -6,9 +6,24 @@
 
 ## Status
 
-This repository contains the domain models, error-code mapping, retry-budget policy, classifier baseline, tests and the initial evaluation data generator. Razorpay webhook integration, context retrieval, action execution, outcome evaluation and the dashboard are planned implementation slices.
+The end-to-end recovery system is implemented and running against Razorpay test mode.
 
-The system does not claim production recovery uplift yet.
+| Component | Status |
+|---|---|
+| FastAPI webhook receiver — HMAC-SHA256, fail-closed | ✅ |
+| React 18 live pipeline dashboard (React Flow + Chart.js, WebSocket) | ✅ |
+| Idempotent recovery engine — SQLite WAL, exactly-once claim/decide/execute | ✅ |
+| Deterministic safety gate — terminal codes, amount ceiling, rate limit, budget | ✅ |
+| ML scorer — GradientBoosting pipeline trained on 140 API-verified outcomes | ✅ |
+| SHAP explainability endpoint `/api/model/explain` | ✅ |
+| Playwright checkout bot — real Razorpay test-mode netbanking automation | ✅ |
+| 3-arm evaluation harness — natural / control / treatment + bootstrap 95% CI | ✅ |
+| NPCI-calibrated batch generator — 4 scenario profiles | ✅ |
+| Streamlit policy-comparison dashboard | ✅ |
+| Periodic incremental model retraining (every 15 min, FROZEN guard) | ✅ |
+| Unit tests — classifier + policy (63 tests) | ✅ |
+
+The system does not claim production recovery uplift without a randomised merchant experiment.
 
 ## Problem
 
@@ -291,70 +306,126 @@ The hidden label and potential outcomes are simulator assumptions. They are not 
 mandate-doctor/
 ├── src/mandate_doctor/
 │   ├── core/
-│   │   ├── models.py
-│   │   ├── codes.py
-│   │   ├── classifier.py
-│   │   ├── policy.py
-│   │   └── estimator.py             # planned
+│   │   ├── models.py          — Pydantic domain models (Mandate, DebitAttempt, Decision)
+│   │   ├── codes.py           — Razorpay error-code → failure-bucket lookup
+│   │   ├── classifier.py      — 3-layer classifier (deterministic → pattern → LLM)
+│   │   ├── policy.py          — NPCI OC-215A retry budget, cycle-scoped
+│   │   ├── idempotency.py     — SQLite WAL exactly-once claim/decide/execute
+│   │   └── scorer.py          — GradientBoosting ML scorer (joblib pipeline)
 │   ├── services/
-│   │   ├── razorpay.py              # planned
-│   │   ├── webhook_handler.py       # planned
-│   │   └── action_executor.py       # planned
-│   ├── api/
-│   │   └── routes.py                # planned
-│   └── audit/
-│       └── logger.py                # planned
-├── tests/
-│   ├── unit/
-│   └── integration/
+│   │   ├── razorpay.py        — Razorpay test-mode API client (orders, links, fetch)
+│   │   └── llm.py             — OpenAI-compatible LLM client (advisory classifier)
+│   └── api/
+│       ├── app.py             — FastAPI: webhook, batch control, ML endpoints, WS
+│       ├── events.py          — In-process WebSocket event bus
+│       └── static/index.html  — React 18 live pipeline dashboard
 ├── eval/
-│   ├── generate_batch.py
-│   ├── outcome_environment.py       # planned
-│   └── harness.py                   # planned
-├── data/
-│   ├── README.md                    # Calibration source provenance
-│   ├── npci-autopay-execution-2026-07.csv
-│   └── npci-autopay-payer-psp-execution-2026-07.csv
+│   ├── generate_batch.py      — NPCI-calibrated scenario generator (4 profiles)
+│   ├── outcome_environment.py — Hidden-label potential-outcome table (evaluator only)
+│   ├── harness.py             — 3-arm harness: natural / control / treatment + CI
+│   ├── data_collector.py      — Real Razorpay test-mode data collection loop
+│   ├── checkout_bot.py        — Playwright automation for hosted checkout
+│   ├── train_model.py         — GradientBoosting pipeline trainer + incremental retraining
+│   └── model_comparison.py    — 43-model benchmark (LDA, LogReg, KNN, SVM, GBM, ...)
 ├── dashboard/
-│   └── app.py                       # planned
+│   └── app.py                 — Streamlit policy-comparison dashboard
+├── models/
+│   ├── recovery_pipeline.joblib — Fitted GradientBoosting pipeline (FROZEN)
+│   ├── recovery_model.json      — Model metadata, metrics, feature importances
+│   └── FROZEN                   — Guard: prevents accidental overwrite of tuned model
+├── data/
+│   ├── README.md              — Calibration source provenance
+│   ├── training_data.db       — API-verified outcomes (140 clean rows, design_version=2)
+│   └── npci-autopay-execution-2026-07.csv — Frozen NPCI Jul-2026 remitter snapshot
+├── tests/
+│   └── unit/                  — 63 tests: classifier + policy
 ├── docs/
-│   └── architecture.md
+│   ├── architecture.md
+│   └── architecture.pdf
 ├── .env.example
 ├── pyproject.toml
 └── README.md
 ```
 
-## Current Commands
+## How to Run
+
+### Prerequisites
+
+- Python 3.11+
+- A Razorpay test-mode account — [console.razorpay.com](https://dashboard.razorpay.com)
+- (Optional) An OpenAI-compatible API key for the LLM classifier layer
+
+### Install
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-pytest tests/ -v
-python eval/generate_batch.py
+git clone <repo-url> && cd mandate-doctor
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[eval,dashboard,dev]"
+playwright install chromium          # for the checkout bot
+cp .env.example .env                 # fill in RAZORPAY_KEY_ID, KEY_SECRET, WEBHOOK_SECRET
 ```
 
-The API and dashboard commands will be added when those components exist. Documentation will not advertise unimplemented commands as working features.
+### Run the recovery pipeline + React dashboard
 
-## Current Implementation
+```bash
+uvicorn mandate_doctor.api.app:app --host 0.0.0.0 --port 8000
+# Open http://localhost:8000
+```
 
-Implemented:
+### Trigger a recovery batch
 
-- Pydantic domain models
-- Razorpay-style error-code mapping
-- Deterministic and description-pattern classifier baseline
-- Retry-budget policy with safe exhaustion behavior
-- Unit tests for current classifier and policy behavior
-- Seeded failed-attempt generator
+```bash
+curl -X POST http://localhost:8000/api/batch/start \
+  -H "Content-Type: application/json" \
+  -d '{"n": 6, "workers": 1}'
+```
 
-Next implementation slices:
+Watch the React Flow graph animate as the Playwright bot drives each scenario through the real Razorpay hosted checkout.
 
-1. Independent outcome environment and control/treatment harness
-2. Recovery context store and action-score contract
-3. Razorpay webhook ingestion and signature verification
-4. Tool interfaces and deterministic safety gate
-5. Test-mode action executors and outcome observer
-6. Dashboard for real integration and simulated evaluation results
+### Prove idempotency (audit trail)
+
+```bash
+# Fire 10 identical payment.failed webhooks concurrently
+curl -X POST http://localhost:8000/api/demo/duplicate-webhooks | jq .
+# → { "webhooks_fired": 10, "executed": 1, "deduplicated": 9, "verdict": "exactly-once holds" }
+```
+
+### Score a payment with the ML model
+
+```bash
+curl -X POST http://localhost:8000/api/model/predict \
+  -H "Content-Type: application/json" \
+  -d '{"npci_bank":"Canara Bank","error_class":"bd","amount_paise":19900,"regime":"optimistic","retry_prior":0.27}' \
+  | jq .
+```
+
+### SHAP explainability
+
+```bash
+curl -X POST http://localhost:8000/api/model/explain \
+  -H "Content-Type: application/json" \
+  -d '{"npci_bank":"HDFC Bank","error_class":"td","amount_paise":49900,"regime":"pessimistic","retry_prior":0.06}' \
+  | jq .top_contributions
+```
+
+### Run the evaluation harness (3-arm policy comparison)
+
+```bash
+python -m eval.harness
+# Prints natural / control / treatment recovery rates + 95% CI for all 4 profiles
+```
+
+### Open the policy-comparison dashboard
+
+```bash
+streamlit run dashboard/app.py
+```
+
+### Run tests
+
+```bash
+pytest tests/ -v
+```
 
 ## License
 
