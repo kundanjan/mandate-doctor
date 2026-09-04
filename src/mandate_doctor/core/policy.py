@@ -81,7 +81,7 @@ def decide(
     reasoning: str,
 ) -> Decision:
     """Make a decision based on the classification and retry budget.
-
+    
     Returns a Decision with action, reasoning, and remaining retries.
     """
     mandate_id = attempt.mandate_id

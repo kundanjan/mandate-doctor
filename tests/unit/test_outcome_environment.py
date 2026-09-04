@@ -35,7 +35,7 @@ class TestOutcomeMaterialization:
         table = _build_table(size=20)
         for scenario_id in table.scenario_ids():
             for action in (ACTION_RETRY, ACTION_PAYMENT_LINK, ACTION_RECONSENT, ACTION_HOLD):
-                for day in range(0, HORIZON_DAYS + 1):
+                for day in range(HORIZON_DAYS + 1):
                     outcome = table.outcome(scenario_id, action, day)
                     assert outcome.scenario_id == scenario_id
                     assert outcome.action == action
@@ -49,7 +49,7 @@ class TestOutcomeMaterialization:
     def test_hold_never_recovers(self):
         table = _build_table(size=20)
         for scenario_id in table.scenario_ids():
-            for day in range(0, HORIZON_DAYS + 1):
+            for day in range(HORIZON_DAYS + 1):
                 assert table.outcome(scenario_id, ACTION_HOLD, day).succeeds is False
 
 
@@ -62,7 +62,7 @@ class TestDeterminism:
         assert table_a.scenario_ids() == table_b.scenario_ids()
         for scenario_id in table_a.scenario_ids():
             for action in (ACTION_RETRY, ACTION_PAYMENT_LINK, ACTION_RECONSENT, ACTION_HOLD):
-                for day in range(0, 6):
+                for day in range(6):
                     outcome_a = table_a.outcome(scenario_id, action, day)
                     outcome_b = table_b.outcome(scenario_id, action, day)
                     assert outcome_a == outcome_b
@@ -112,5 +112,5 @@ class TestTerminalNeverRetries:
             scenario = table.scenario(scenario_id)
             if scenario.hidden_failure_category != HIDDEN_TERMINAL:
                 continue
-            for day in range(0, HORIZON_DAYS + 1):
+            for day in range(HORIZON_DAYS + 1):
                 assert table.outcome(scenario_id, ACTION_RETRY, day).succeeds is False
