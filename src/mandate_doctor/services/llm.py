@@ -72,7 +72,22 @@ async def llm_classify(
 
     try:
         response = await _call_llm(prompt)
-        result = json.loads(response)
+        # Robust extraction: strip markdown fences and extract JSON object if wrapped in text
+        cleaned = response.strip()
+        if "```" in cleaned:
+            # extract content between fences
+            import re
+
+            fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
+            if fence_match:
+                cleaned = fence_match.group(1)
+        if cleaned and not cleaned.lstrip().startswith("{"):
+            # find first { .. last } substring
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                cleaned = cleaned[start : end + 1]
+        result = json.loads(cleaned)
 
         bucket_str = result.get("bucket", "AMBIGUOUS").upper()
         try:
@@ -144,7 +159,7 @@ async def _call_llm(prompt: str) -> str:
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
-                "max_tokens": 200,
+                "max_tokens": 600,
             },
         )
         resp.raise_for_status()

@@ -534,9 +534,26 @@ async def explain_recovery(req: PredictRequest) -> dict[str, Any]:
         explainer = shap.TreeExplainer(clf)
         shap_values = explainer.shap_values(X_transformed)
 
-        vals = shap_values[0]
-        ev = explainer.expected_value
-        base_value = float(ev[0]) if hasattr(ev, '__len__') else float(ev)
+        # shap 0.51 + sklearn GBM returns (1,22,2) for binary — extract positive class
+        import numpy as np  # type: ignore[import-untyped]
+
+        if isinstance(shap_values, list):
+            # older API: list[array(n_samples, n_features)] per class
+            vals = shap_values[1][0] if len(shap_values) > 1 else shap_values[0][0]
+            ev = explainer.expected_value
+            ev = ev[1] if hasattr(ev, "__len__") and len(ev) > 1 else ev  # type: ignore[index]
+            base_value = float(ev)  # type: ignore[arg-type]
+        elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
+            # (n_samples, n_features, n_classes) — pick class 1
+            vals = shap_values[0, :, 1]
+            ev = explainer.expected_value
+            ev_arr = np.asarray(ev)
+            base_value = float(ev_arr.flat[1]) if ev_arr.size > 1 else float(ev_arr.flat[0])
+        else:
+            # (n_samples, n_features)
+            vals = shap_values[0]  # type: ignore[index]
+            ev = explainer.expected_value
+            base_value = float(ev[0]) if hasattr(ev, "__len__") else float(ev)  # type: ignore[index]
 
         # Pair feature names with SHAP values, sort by absolute impact
         contributions = []
